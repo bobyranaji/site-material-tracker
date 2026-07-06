@@ -15,20 +15,9 @@ UPLOAD_DIR = "stored_documents"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 DB_FILE = "material_ledger.csv"
 TARGET_FILE = "project_targets.csv"
-LIST_FILE = "material_list.csv"
 
-# Core Seed List to initialize system fallback profiles safely
+# Foundational List
 DEFAULT_MATERIALS = ["Cement", "Gypsum Board", "Partition Channel", "Ceiling Framing Material", "Tiles", "Marble", "Glazing"]
-
-def load_material_list():
-    if os.path.exists(LIST_FILE):
-        try:
-            stored_list = pd.read_csv(LIST_FILE)["Material Type"].dropna().unique().tolist()
-            if len(stored_list) > 0:
-                return stored_list
-        except Exception:
-            pass
-    return DEFAULT_MATERIALS.copy()
 
 def load_ledger():
     if os.path.exists(DB_FILE):
@@ -38,24 +27,31 @@ def load_ledger():
             pass
     return pd.DataFrame(columns=["Delivery Date", "Invoice No", "Supplier", "Material Type", "Quantity", "Unit", "MIR Ref No", "MIR Status", "Invoice File", "MIR File"])
 
-def load_targets(current_materials):
-    targets_dict = {mat: 0.0 for mat in current_materials}
+def load_targets():
+    targets_dict = {}
     if os.path.exists(TARGET_FILE):
         try:
             stored_df = pd.read_csv(TARGET_FILE)
             for _, row in stored_df.iterrows():
-                targets_dict[row["Material Type"]] = float(row["Target"])
+                targets_dict[str(row["Material Type"]).strip()] = float(row["Target"])
         except Exception:
             pass
     return targets_dict
 
-# Initialize all storage profiles dynamically
-current_materials = load_material_list()
 ledger_df = load_ledger()
-targets = load_targets(current_materials)
+saved_targets = load_targets()
+
+# Gather every single unique material name currently sitting in our ledger database
+if not ledger_df.empty:
+    ledger_materials = ledger_df["Material Type"].dropna().unique().tolist()
+else:
+    ledger_materials = []
+
+# Merge default list with any new unique materials found in the ledger database rows
+all_active_materials = sorted(list(set(DEFAULT_MATERIALS + ledger_materials)))
 
 # ==========================================
-# 2. DYNAMIC AI EXTRACTION ENGINE (GEMINI)
+# 2. AI EXTRACTION ENGINE (GEMINI)
 # ==========================================
 def extract_document_data(api_key, invoice_file, mir_file, existing_categories):
     try:
@@ -118,7 +114,7 @@ with tab1:
             st.warning("Please provide an API Key first!")
         elif inv_upload and mir_upload:
             with st.spinner("AI parsing all line items dynamically..."):
-                extracted_list = extract_document_data(api_key, inv_upload, mir_upload, current_materials)
+                extracted_list = extract_document_data(api_key, inv_upload, mir_upload, all_active_materials)
                 if extracted_list:
                     for item in extracted_list:
                         try:
@@ -130,7 +126,6 @@ with tab1:
         else:
             st.error("Please upload both documents first.")
 
-    # Live Preview and Verification Spreadsheet Table
     if 'parsed_items' in st.session_state:
         st.subheader("📝 Step 2: Review and Edit Extracted Items")
         st.info("You can add temporary categories or double-click to clean text strings directly in the layout grid below.")
@@ -140,7 +135,7 @@ with tab1:
         edited_df = st.data_editor(
             preview_df,
             column_config={
-                "Material Type": st.column_config.TextColumn("Material Category", help="If AI created a new name, keep it or adjust spelling here", required=True),
+                "Material Type": st.column_config.TextColumn("Material Category", help="Clean or change the category name directly here", required=True),
                 "Delivery Date": st.column_config.DateColumn("Date", required=True),
                 "Quantity": st.column_config.NumberColumn("Qty", min_value=0.0, format="%.2f")
             },
@@ -154,24 +149,17 @@ with tab1:
                 inv_path = os.path.join(UPLOAD_DIR, f"{timestamp}_INV_{inv_upload.name}")
                 mir_path = os.path.join(UPLOAD_DIR, f"{timestamp}_MIR_{mir_upload.name}")
                 
-                with open(inv_path, "wb") as f: 
-                    f.write(inv_upload.getbuffer())
-                with open(mir_path, "wb") as f: 
-                    f.write(mir_upload.getbuffer())
+                with open(inv_path, "wb") as f: f.write(inv_upload.getbuffer())
+                with open(mir_path, "wb") as f: f.write(mir_upload.getbuffer())
                 
                 edited_df["Delivery Date"] = edited_df["Delivery Date"].astype(str)
                 edited_df["Invoice File"] = inv_path
                 edited_df["MIR File"] = mir_path
                 
-                incoming_materials = edited_df["Material Type"].dropna().unique().tolist()
-                updated_materials = list(set(current_materials + incoming_materials))
-                
-                pd.DataFrame({"Material Type": updated_materials}).to_csv(LIST_FILE, index=False)
-                
                 updated_df = pd.concat([ledger_df, edited_df], ignore_index=True)
                 updated_df.to_csv(DB_FILE, index=False)
                 
-                st.success("All items successfully processed and categories dynamically synchronized!")
+                st.success("All items successfully processed and ledger synchronized!")
                 del st.session_state['parsed_items']
                 st.rerun()
 
@@ -183,7 +171,7 @@ with tab2:
     if not ledger_df.empty:
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            f_mat = st.multiselect("Filter by Material Category", current_materials, default=current_materials)
+            f_mat = st.multiselect("Filter by Material Category", all_active_materials, default=all_active_materials)
         with col_f2:
             unique_suppliers = ledger_df["Supplier"].dropna().unique().tolist()
             f_vendor = st.multiselect("Filter by Supplier Vendor", unique_suppliers, default=unique_suppliers)
@@ -207,3 +195,13 @@ with tab2:
                     with open(mir_file_str, "rb") as file_mir:
                         c4.download_button(label="📥 Download MIR", data=file_mir.read(), file_name=os.path.basename(mir_file_str), key=f"mir_{index}")
                     
+        st.download_button(label="📊 Export Full Ledger Log to CSV", data=filtered_df.to_csv(index=False), file_name="site_reconciliation_report.csv", mime="text/csv")
+    else:
+        st.info("No delivery records compiled inside storage records yet.")
+
+# ------------------------------------------
+# TAB 3: PROJECT ANALYTICS (ISOLATED & BULLETPROOF)
+# ------------------------------------------
+with tab3:
+    st.header("📈 Material Procurement Target Tracking Matrix")
+    st.subheader("1. Configure Total Contract Quantities Required on Site")

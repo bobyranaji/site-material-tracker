@@ -11,16 +11,13 @@ import json
 # ==========================================
 st.set_page_config(page_title="Site Material Tracker", layout="wide")
 
-# Create folders to store database and uploaded documents
 UPLOAD_DIR = "stored_documents"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 DB_FILE = "material_ledger.csv"
 TARGET_FILE = "project_targets.csv"
 
-# Material Choices Layout
 MATERIAL_LIST = ["Cement", "Gypsum Board", "Partition Channel", "Ceiling Framing Material", "Tiles", "Marble", "Glazing", "Other"]
 
-# Load Data Helpers
 def load_ledger():
     if os.path.exists(DB_FILE):
         try:
@@ -37,7 +34,6 @@ def load_targets():
             pass
     return {mat: 0.0 for mat in MATERIAL_LIST if mat != "Other"}
 
-# Initialize Data
 ledger_df = load_ledger()
 targets = load_targets()
 
@@ -49,7 +45,6 @@ def extract_document_data(api_key, invoice_file, mir_file):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # Load images for Gemini processing
         inv_img = Image.open(invoice_file)
         mir_img = Image.open(mir_file)
         
@@ -58,8 +53,8 @@ def extract_document_data(api_key, invoice_file, mir_file):
         Document 1 is a Material Delivery Invoice.
         Document 2 is a Material Inspection Report (MIR).
         
-        Extract the following fields accurately. Pick the Material Type strictly from this list: {', '.join(MATERIAL_LIST)}.
-        Format your response EXACTLY as a clean JSON object structure matching this format precisely:
+        Extract fields accurately. Pick Material Type strictly from: {', '.join(MATERIAL_LIST)}.
+        Format your response EXACTLY as a clean JSON object matching this format precisely:
         {{
             "Delivery Date": "YYYY-MM-DD",
             "Invoice No": "string",
@@ -70,7 +65,7 @@ def extract_document_data(api_key, invoice_file, mir_file):
             "MIR Ref No": "string",
             "MIR Status": "Passed"
         }}
-        Provide only the clean JSON string structure. No markdown formatting.
+        Provide only clean JSON string. No markdown formatting.
         """
         
         response = model.generate_content([prompt, inv_img, mir_img])
@@ -201,13 +196,20 @@ with tab2:
 # ------------------------------------------
 with tab3:
     st.header("Material Procurement Target Tracking Matrix")
+    st.subheader("Configure Project Structural Requirements Estimations")
     
-    with st.form("targets_setup_form"):
-        st.subheader("Configure Project Structural Requirements Estimations")
-        inputs = {}
-        cols = st.columns(3)
-        for idx, mat in enumerate([m for m in MATERIAL_LIST if m != "Other"]):
-            with cols[idx % 3]:
-                inputs[mat] = st.number_input(f"Total {mat} Required Quantity:", min_value=0.0, value=float(targets.get(mat, 0.0)))
-        
-        if st.form_submit_button("Update Contract Targets Data"):
+    inputs = {}
+    cols = st.columns(3)
+    target_materials = [m for m in MATERIAL_LIST if m != "Other"]
+    
+    for idx, mat in enumerate(target_materials):
+        with cols[idx % 3]:
+            inputs[mat] = st.number_input(f"Total {mat} Required Quantity:", min_value=0.0, value=float(targets.get(mat, 0.0)), key=f"input_{mat}")
+    
+    if st.button("Update Contract Targets Data"):
+        pd.DataFrame([inputs]).melt(var_name="Material Type", value_name="Target").to_csv(TARGET_FILE, index=False)
+        st.success("Target baselines aligned successfully.")
+        st.rerun()
+
+    st.subheader("Procurement Fulfillment Dashboards Metrics")
+    for mat in target_materials:

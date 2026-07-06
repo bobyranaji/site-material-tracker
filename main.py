@@ -135,7 +135,6 @@ with tab1:
         
         preview_df = pd.DataFrame(st.session_state['parsed_items'])
         
-        # Grid setup with dynamic type tracking options enabled
         edited_df = st.data_editor(
             preview_df,
             column_config={
@@ -153,22 +152,20 @@ with tab1:
                 inv_path = os.path.join(UPLOAD_DIR, f"{timestamp}_INV_{inv_upload.name}")
                 mir_path = os.path.join(UPLOAD_DIR, f"{timestamp}_MIR_{mir_upload.name}")
                 
-                with open(inv_path, "wb") as f: f.write(inv_upload.getbuffer())
-                with open(mir_path, "wb") as f: f.write(mir_upload.getbuffer())
+                with open(inv_path, "wb") as f: 
+                    f.write(inv_upload.getbuffer())
+                with open(mir_path, "wb") as f: 
+                    f.write(mir_upload.getbuffer())
                 
-                # Format tracking fields out into string configurations
                 edited_df["Delivery Date"] = edited_df["Delivery Date"].astype(str)
                 edited_df["Invoice File"] = inv_path
                 edited_df["MIR File"] = mir_path
                 
-                # Dynamic Sync: Check if any new item types were registered
                 incoming_materials = edited_df["Material Type"].dropna().unique().tolist()
                 updated_materials = list(set(current_materials + incoming_materials))
                 
-                # Commit dynamic category structural lists back to file system storage
                 pd.DataFrame({"Material Type": updated_materials}).to_csv(LIST_FILE, index=False)
                 
-                # Merge row adjustments into general transactional ledger files
                 updated_df = pd.concat([ledger_df, edited_df], ignore_index=True)
                 updated_df.to_csv(DB_FILE, index=False)
                 
@@ -197,8 +194,14 @@ with tab2:
                 c1, c2, c3, c4 = st.columns(4)
                 c1.write(f"**Supplier:** {row['Supplier']}")
                 c2.write(f"**MIR Status:** {row['MIR Status']} ({row['MIR Ref No']})")
-                if os.path.exists(str(row["Invoice File"])):
-                    with open(str(row["Invoice File"]), "rb") as file_inv:
-                        c3.download_button(label="📥 Download Invoice", data=file_inv.read(), file_name=os.path.basename(str(row["Invoice File"])), key=f"inv_{index}")
-                if os.path.exists(str(row["MIR File"])):
-                    with open(str(row["MIR File"]), "rb") as file_mir:
+                
+                inv_file_str = str(row["Invoice File"])
+                if os.path.exists(inv_file_str):
+                    with open(inv_file_str, "rb") as file_inv:
+                        c3.download_button(label="📥 Download Invoice", data=file_inv.read(), file_name=os.path.basename(inv_file_str), key=f"inv_{index}")
+                
+                mir_file_str = str(row["MIR File"])
+                if os.path.exists(mir_file_str):
+                    with open(mir_file_str, "rb") as file_mir:
+                        c4.download_button(label="📥 Download MIR", data=file_mir.read(), file_name=os.path.basename(mir_file_str), key=f"mir_{index}")
+                    

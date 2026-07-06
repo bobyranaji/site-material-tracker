@@ -5,7 +5,6 @@ import datetime
 from google import generativeai as genai
 from PIL import Image
 import json
-from pypdf import PdfReader
 
 # ==========================================
 # 1. SETUP & CONFIGURATION
@@ -23,7 +22,7 @@ def load_ledger():
             return pd.read_csv(DB_FILE)
         except Exception:
             pass
-    return pd.DataFrame(columns=["Delivery Date", "Invoice No", "Supplier", "Material Type", "Quantity", "Unit", "MIR Ref No", "MIR Status", "Combined Document File"])
+    return pd.DataFrame(columns=["Delivery Date", "Invoice No", "Supplier", "Material Type", "Quantity", "Unit", "MIR Ref No", "MIR Status", "Invoice File", "MIR File"])
 
 def load_targets():
     targets_dict = {}
@@ -41,55 +40,42 @@ ledger_df = load_ledger()
 saved_targets = load_targets()
 
 # ==========================================
-# 2. COMBINED PDF / IMAGE AI ENGINE (GEMINI)
+# 2. AI EXTRACTION ENGINE (GEMINI)
 # ==========================================
-def extract_combined_document(api_key, combined_file):
+def extract_document_data(api_key, invoice_file, mir_file, existing_categories):
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        
-        # Check if the uploaded file is a PDF or an Image
-        if combined_file.name.lower().endswith('.pdf'):
-            # If PDF, read the text out of the pages first
-            reader = PdfReader(combined_file)
-            pdf_text = ""
-            for page in reader.pages:
-                pdf_text += page.extract_text() + "\n"
-            
-            # Use the text contents for Gemini analysis
-            content_payload = f"Document Text Contents:\n{pdf_text}"
-        else:
-            # If Image, process using the standard image framework
-            content_payload = Image.open(combined_file)
+        inv_img = Image.open(invoice_file)
+        mir_img = Image.open(mir_file)
         
         prompt = """
-        Analyze this construction site document data, which contains both a Material Delivery Invoice and its matching Material Inspection Report (MIR) attached together.
-        
-        Carefully scan all contents and extract ALL unique material line items found.
+        Analyze these construction documents: Document 1 (Invoice), Document 2 (Inspection Report - MIR).
+        Extract ALL items found on the invoice line entries.
         
         INSTRUCTION FOR MATERIAL TYPE IDENTIFICATION:
-        - Look closely at the item descriptions listed in the document text/image.
-        - Clean and extract its clear trade name or commodity description (e.g., "Cement", "Granite", "Paint", "Plywood", "Tiles"). Keep names short and punchy (1 to 3 words max).
+        1. Look at the item description on the invoice.
+        2. Clean and extract its trade or commodity name from the text description (e.g., "Cement", "Granite", "Paint", "Plywood", "Tiles"). Keep names concise (1 to 3 words max).
 
-        Format your final response strictly as a JSON list of objects matching this precise template layout. Do not wrap in markdown text blocks or backticks:
+        Format your response strictly as a JSON list of objects matching this template layout. Do not wrap in markdown or backticks:
         [
             {
                 "Delivery Date": "YYYY-MM-DD",
                 "Invoice No": "string",
                 "Supplier": "string",
-                "Material Type": "The clean extracted commodity name",
+                "Material Type": "The extracted commodity name",
                 "Quantity": 0.0,
                 "Unit": "string",
                 "MIR Ref No": "string",
-                "MIR Status": "Passed or Failed"
+                "MIR Status": "Passed"
             }
         ]
         """
-        response = model.generate_content([prompt, content_payload])
+        response = model.generate_content([prompt, inv_img, mir_img])
         clean_text = response.text.replace("```json", "").replace("```python", "").replace("```", "").strip()
         return json.loads(clean_text)
     except Exception as e:
-        st.error(f"AI parsing failed: {e}. Ensure the uploaded file is clear and readable.")
+        st.error(f"AI parsing failed: {e}.")
         return None
 
 # ==========================================
@@ -99,23 +85,24 @@ st.title("🏗️ Smart Site Material Tracker & Reconciler")
 tab1, tab2, tab3 = st.tabs(["📋 Document Inwarding", "📊 Master Ledger & Reconciliation", "📈 Project Analytics"])
 
 # ------------------------------------------
-# TAB 1: DOCUMENT INWARDING (UPDATED FOR PDF)
+# TAB 1: DOCUMENT INWARDING
 # ------------------------------------------
 with tab1:
-    st.header("Scan & Upload Combined Document")
-    st.info("💡 Attach the scanned single file that contains both the invoice and the inspection report (MIR) together. Accepts PDF, PNG, and JPG formats.")
-    
+    st.header("Scan & Upload Site Documents")
     api_key = st.text_input("Enter Gemini API Key to enable AI scanning:", type="password")
     
-    # Unified uploader box unlocked for PDFs
-    combined_upload = st.file_uploader("Upload Combined Invoice + MIR Document (PDF / Image)", type=["pdf", "png", "jpg", "jpeg"])
+    col1, col2 = st.columns(2)
+    with col1:
+        inv_upload = st.file_uploader("Upload Scanned Invoice (Image/PNG/JPG)", type=["png", "jpg", "jpeg"])
+    with col2:
+        mir_upload = st.file_uploader("Upload Material Inspection Report (Image/PNG/JPG)", type=["png", "jpg", "jpeg"])
         
-    if st.button("🚀 Analyze Combined Document"):
+    if st.button("🚀 Analyze Documents with AI"):
         if not api_key:
             st.warning("Please provide an API Key first!")
-        elif combined_upload:
-            with st.spinner("AI scanning combined document sheets..."):
-                extracted_list = extract_combined_document(api_key, combined_upload)
+        elif inv_upload and mir_upload:
+            with st.spinner("AI parsing all line items dynamically..."):
+                extracted_list = extract_document_data(api_key, inv_upload, mir_upload, [])
                 if extracted_list:
                     for item in extracted_list:
                         try:
@@ -123,9 +110,9 @@ with tab1:
                         except Exception:
                             item["Delivery Date"] = datetime.date.today()
                     st.session_state['parsed_items'] = extracted_list
-                    st.success(f"Successfully extracted {len(extracted_list)} material rows from the document!")
+                    st.success(f"Successfully extracted {len(extracted_list)} line items!")
         else:
-            st.error("Please upload a combined document file first.")
+            st.error("Please upload both documents first.")
 
     if 'parsed_items' in st.session_state:
         st.subheader("📝 Step 2: Review and Edit Extracted Items")
@@ -143,23 +130,22 @@ with tab1:
         )
         
         if st.button("💾 Save All Rows to Ledger"):
-            if combined_upload:
+            if inv_upload and mir_upload:
                 timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-                doc_path = os.path.join(UPLOAD_DIR, f"{timestamp}_COMBINED_{combined_upload.name}")
+                inv_path = os.path.join(UPLOAD_DIR, f"{timestamp}_INV_{inv_upload.name}")
+                mir_path = os.path.join(UPLOAD_DIR, f"{timestamp}_MIR_{mir_upload.name}")
                 
-                with open(doc_path, "wb") as f: 
-                    f.write(combined_upload.getbuffer())
+                with open(inv_path, "wb") as f: f.write(inv_upload.getbuffer())
+                with open(mir_path, "wb") as f: f.write(mir_upload.getbuffer())
                 
                 edited_df["Delivery Date"] = edited_df["Delivery Date"].astype(str)
-                edited_df["Combined Document File"] = doc_path
-                
-                if "Invoice File" in edited_df.columns: edited_df = edited_df.drop(columns=["Invoice File"])
-                if "MIR File" in edited_df.columns: edited_df = edited_df.drop(columns=["MIR File"])
+                edited_df["Invoice File"] = inv_path
+                edited_df["MIR File"] = mir_path
                 
                 updated_df = pd.concat([ledger_df, edited_df], ignore_index=True)
                 updated_df.to_csv(DB_FILE, index=False)
                 
-                st.success("All line items committed to master ledger database successfully!")
+                st.success("All items successfully saved!")
                 del st.session_state['parsed_items']
                 st.rerun()
 
@@ -182,14 +168,19 @@ with tab2:
         
         for index, row in filtered_df.iterrows():
             with st.expander(f"📅 {row['Delivery Date']} | {row['Material Type']} - {row['Quantity']} {row['Unit']} (Inv: {row['Invoice No']})"):
-                c1, c2, c3 = st.columns(3)
+                c1, c2, c3, c4 = st.columns(4)
                 c1.write(f"**Supplier:** {row['Supplier']}")
                 c2.write(f"**MIR Status:** {row['MIR Status']} ({row['MIR Ref No']})")
                 
-                doc_file_str = str(row["Combined Document File"]) if "Combined Document File" in row and pd.notna(row["Combined Document File"]) else ""
-                if os.path.exists(doc_file_str):
-                    with open(doc_file_str, "rb") as file_doc:
-                        c3.download_button(label="📥 Download Combined Doc File", data=file_doc.read(), file_name=os.path.basename(doc_file_str), key=f"doc_{index}")
+                inv_file_str = str(row["Invoice File"])
+                if os.path.exists(inv_file_str):
+                    with open(inv_file_str, "rb") as file_inv:
+                        c3.download_button(label="📥 Download Invoice", data=file_inv.read(), file_name=os.path.basename(inv_file_str), key=f"inv_{index}")
+                
+                mir_file_str = str(row["MIR File"])
+                if os.path.exists(mir_file_str):
+                    with open(mir_file_str, "rb") as file_mir:
+                        c4.download_button(label="📥 Download MIR", data=file_mir.read(), file_name=os.path.basename(mir_file_str), key=f"mir_{index}")
                     
         st.download_button(label="📊 Export Full Ledger Log to CSV", data=filtered_df.to_csv(index=False), file_name="site_reconciliation_report.csv", mime="text/csv")
     else:
@@ -210,3 +201,12 @@ with tab3:
         ).reset_index()
         
         summary_df.columns = ["Material Category", "Total Delivered Till Now", "Unit"]
+        
+        summary_df["Total Required Quantity"] = summary_df["Material Category"].map(lambda x: float(saved_targets.get(str(x).strip(), 0.0)))
+        
+        # Super clean math calculation replacing the broken complex lambda function trap
+        summary_df["Fulfillment Progress Bar"] = summary_df["Total Delivered Till Now"] / summary_df["Total Required Quantity"].replace(0, 1)
+        summary_df.loc[summary_df["Total Required Quantity"] <= 0, "Fulfillment Progress Bar"] = 0.0
+        
+        st.info("💡 Click on the **Total Required Quantity** column to add or adjust your site targets using the stepper tools or text entry. Hit Save to compute live progress bar charts!")
+        

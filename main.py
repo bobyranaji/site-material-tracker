@@ -150,7 +150,7 @@ with tab1:
                 st.rerun()
 
 # ------------------------------------------
-# TAB 2: MASTER Ledger & RECONCILIATION
+# TAB 2: MASTER LEDGER & RECONCILIATION
 # ------------------------------------------
 with tab2:
     st.header("Site Material Inventory Ledger Log")
@@ -210,7 +210,7 @@ with tab3:
             if target_qty > 0:
                 fraction_val = min(total_delivered / target_qty, 1.0)
                 
-            analytics_rows.append({
+            row_dict = {
                 "Material Category": mat,
                 "Total Delivered Till Now": total_delivered,
                 "Unit": unit_label,

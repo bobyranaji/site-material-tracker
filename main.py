@@ -187,136 +187,56 @@ with tab3:
     st.info("Attach your project BOQ sheet (Excel, PDF, or Image scan). The AI reads it or extracts the values automatically.")
     
     api_key_t3 = st.text_input("Enter Gemini API Key to enable BOQ scanning (Only needed for PDF/Images):", type="password", key="api_key_t3")
-    
-    # UNLOCKED: Accepts excel formats (.xlsx, .xls) alongside standard media types
     boq_upload = st.file_uploader("Upload Project BOQ File (Excel / PDF / Image)", type=["xlsx", "xls", "pdf", "png", "jpg", "jpeg"], key="upload_t3")
     
     if st.button("🤖 Analyze & Extract Quantities from BOQ"):
         if boq_upload:
             file_name = boq_upload.name.lower()
+            parsed_boq = None
             
-            # AUTOMATED EXCEL PARSING: If it is an Excel sheet, read it directly via pandas instantly
             if file_name.endswith('.xlsx') or file_name.endswith('.xls'):
                 with st.spinner("Reading Excel file lines directly..."):
                     try:
                         excel_df = pd.read_excel(boq_upload)
-                        # Ask Gemini to map the column descriptions from the clean spreadsheet structure
                         genai.configure(api_key=api_key_t3 if api_key_t3 else "dummy_key")
                         model = genai.GenerativeModel('gemini-2.5-flash')
-                        
                         excel_sample = excel_df.head(40).to_string()
-                        prompt_excel = f"""
-                        You are an expert Quantity Surveyor and Construction Data Analyst. Your task is to process row contents from an uploaded Interior Fit-out Project Bill of Quantities (BOQ) spreadsheet and map estimated volumes into a structured array.
-
-                        Analyze this raw Excel row data context:
-                        {excel_sample}
                         
-                        CRITICAL SCOPE MAPPING RULES:
-                        You must categorize every discovered row item strictly into one of these standard Interior Fit-out classifications:
-                        - "Gypsum Board" (e.g., plasterboard walls, drywall ceilings, fire-rated partitions)
-                        - "Partition Channel" (e.g., metal studs, GI tracks, wall bracing profiles)
-                        - "Ceiling Framing Material" (e.g., perimeter channels, main runners, hangers, suspension grids)
-                        - "Tiles" (e.g., ceramic floors, porcelain tiling, vitrified wall dados, skirting tiles)
-                        - "Marble" (e.g., granite counters, natural stone vanity tops, marble flooring slabs)
-                        - "Glazing / Glass Panels" (e.g., toughened glass partitions, mirrors, storefront glass, patch fittings)
-                        - "Wall Paint" (e.g., acrylic emulsion, primers, putty, textured wall coatings, finishes)
-                        - "Acoustic Ceiling Tiles" (e.g., mineral fiber grids, glass-wool boards, soundproofing tiles)
-                        - "Plywood / MDF Boards" (e.g., commercial ply framing, marine ply cabinetry, veneer backing wood)
-                        - "Laminates / Veneer" (e.g., decorative mica sheets, high-pressure laminates, wood veneer skins)
-                        - "Hardware Locks & Hinges" (e.g., hydraulic door closers, cabinet drawer slides, handles, locks)
-                        - "Electrical Conduit Pipes" (e.g., PVC casing pipes, flexible pipes, junction boxes hidden in wall voids)
-                        - "LED Light Fixtures" (e.g., recessed downlights, COB strip lights, panel fittings, task drivers)
-
-                        DATA AGGREGATION DIRECTIVES:
-                        1. Ignore items that do not fall under interior fit-out works (e.g., structural concrete foundation, masonry bricks, landscaping).
-                        2. Clean up complex, wordy trade descriptions into short descriptions matching the exact strings provided above.
-                        3. If the same material category appears across multiple lines or rows (e.g., Gypsum Board used in separate rooms or floors), sum up their quantities into a single aggregated total value.
-                        4. Extract the clean float/integer number representing the cumulative total required quantity.
-
-                        OUTPUT RESTRAINT:
-                        Provide your final output STRICTLY as a raw, clean JSON list of objects matching this exact layout template. Do not include markdown wraps, "```json" block indicators, backticks, or any conversational text or preambles. Output only the clean JSON string structure:
-
-                        [
-                          {{
-                            "Material Category": "Exact classification string from list above",
-                            "Total Required Quantity": 0.0
-                          }}
-                        ]
-                        """
-
+                        # The comprehensive, highly explicit parsing rules for Excel data extraction
+                        prompt_excel = (
+                            "You are an expert Quantity Surveyor and Construction Data Analyst. Your task is to process row contents from an uploaded Interior Fit-out Project Bill of Quantities (BOQ) spreadsheet and map estimated volumes into a structured array.\n\n"
+                            "Analyze this raw Excel row data context:\n" + excel_sample + "\n\n"
+                            "CRITICAL SCOPE MAPPING RULES:\n"
+                            "You must categorize every discovered row item strictly into one of these standard Interior Fit-out classifications:\n"
+                            '- "Gypsum Board" (e.g., plasterboard walls, drywall ceilings, fire-rated partitions)\n'
+                            '- "Partition Channel" (e.g., metal studs, GI tracks, wall bracing profiles)\n'
+                            '- "Ceiling Framing Material" (e.g., perimeter channels, main runners, hangers, suspension grids)\n'
+                            '- "Tiles" (e.g., ceramic floors, porcelain tiling, vitrified wall dados, skirting tiles)\n'
+                            '- "Marble" (e.g., granite counters, natural stone vanity tops, marble flooring slabs)\n'
+                            '- "Glazing / Glass Panels" (e.g., toughened glass partitions, mirrors, storefront glass, patch fittings)\n'
+                            '- "Wall Paint" (e.g., acrylic emulsion, primers, putty, textured wall coatings, finishes)\n'
+                            '- "Acoustic Ceiling Tiles" (e.g., mineral fiber grids, glass-wool boards, soundproofing tiles)\n'
+                            '- "Plywood / MDF Boards" (e.g., commercial ply framing, marine ply cabinetry, veneer backing wood)\n'
+                            '- "Laminates / Veneer" (e.g., decorative mica sheets, high-pressure laminates, wood veneer skins)\n'
+                            '- "Hardware Locks & Hinges" (e.g., hydraulic door closers, cabinet drawer slides, handles, locks)\n'
+                            '- "Electrical Conduit Pipes" (e.g., PVC casing pipes, flexible pipes, junction boxes hidden in wall voids)\n'
+                            '- "LED Light Fixtures" (e.g., recessed downlights, COB strip lights, panel fittings, task drivers)\n\n'
+                            "DATA AGGREGATION DIRECTIVES:\n"
+                            "1. Ignore items that do not fall under interior fit-out works (e.g., structural concrete foundation, masonry bricks, landscaping).\n"
+                            "2. Clean up complex, wordy trade descriptions into short descriptions matching the exact strings provided above.\n"
+                            "3. If the same material category appears across multiple lines or rows (e.g., Gypsum Board used in separate rooms or floors), sum up their quantities into a single aggregated total value.\n"
+                            "4. Extract the clean float/integer number representing the cumulative total required quantity.\n\n"
+                            "OUTPUT RESTRAINT:\n"
+                            "Provide your final output STRICTLY as a raw, clean JSON list of objects matching this exact layout template. Do not include markdown wraps, '```json' block indicators, backticks, or any conversational text or preambles. Output only the clean JSON string structure:\n"
+                            "[\n"
+                            "  {\n"
+                            '    "Material Category": "Exact classification string from list above",\n'
+                            '    "Total Required Quantity": 0.0\n'
+                            "  }\n"
+                            "]"
+                        )
                         response = model.generate_content(prompt_excel)
                         clean_text = response.text.replace("```json", "").replace("```python", "").replace("```", "").strip()
                         parsed_boq = json.loads(clean_text)
                     except Exception as e:
-                        st.error(f"Failed to parse Excel file rows: {e}. If this persists, ensure your columns are formatted clearly.")
-                        parsed_boq = None
-            else:
-                # Standard scan fallback for PDFs or Image captures
-                if not api_key_t3:
-                    st.warning("Please provide your Gemini API key first to parse PDF/Image files!")
-                    parsed_boq = None
-                else:
-                    with st.spinner("AI parsing item codes and quantities from document layout..."):
-                        parsed_boq = extract_boq_document(api_key_t3, boq_upload)
-            
-            # Commit the structured arrays to database disk profiles
-            if parsed_boq:
-                clean_save_dict = {mat: 0.0 for mat in FITOUT_MATERIALS}
-                for entry in parsed_boq:
-                    m_cat = str(entry.get("Material Category", "")).strip()
-                    m_qty = float(entry.get("Total Required Quantity", 0.0))
-                    if m_cat in clean_save_dict:
-                        clean_save_dict[m_cat] = m_qty
-                
-                save_targets_df = pd.DataFrame(list(clean_save_dict.items()), columns=["Material Type", "Target"])
-                save_targets_df.to_csv(TARGET_FILE, index=False)
-                st.success("Successfully generated and saved requirements from BOQ document!")
-                st.rerun()
-        else:
-            st.error("Please select a BOQ spreadsheet or document file first.")
-            
-    st.subheader("📊 Step 2: Interior Fit-out Requirements & Progress Matrix")
-    st.info("💡 Instructions: View material categories below. Click the 'Total Required Quantity' cells to adjust goals manually. Fulfillment percentage updates instantly.")
-
-    analytics_rows = []
-    for mat in FITOUT_MATERIALS:
-        total_delivered = 0.0
-        unit_label = "Units"
-        if not ledger_df.empty:
-            match_rows = ledger_df[(ledger_df["Material Type"] == mat) & (ledger_df["MIR Status"] == "Passed")]
-            total_delivered = float(match_rows["Quantity"].sum())
-            if not match_rows.empty and "Unit" in match_rows.columns:
-                unit_label = str(match_rows["Unit"].dropna().iloc[0])
-                
-        target_qty = float(saved_targets.get(mat, 0.0))
-        progress_ratio = min(total_delivered / target_qty, 1.0) if target_qty > 0 else 0.0
-            
-        analytics_rows.append({
-            "Interior Material Category": mat,
-            "Total Delivered Qty": total_delivered,
-            "Unit": unit_label,
-            "Total Required Quantity": target_qty,
-            "Fulfillment Progress": progress_ratio
-        })
-        
-    summary_df = pd.DataFrame(analytics_rows)
-    edited_summary_df = st.data_editor(
-        summary_df, 
-        column_config={
-            "Interior Material Category": st.column_config.TextColumn("Interior Material Category", disabled=True),
-            "Total Delivered Qty": st.column_config.NumberColumn("Total Delivered Qty", disabled=True, format="%.1f"),
-            "Unit": st.column_config.TextColumn("Unit", disabled=True),
-            "Total Required Quantity": st.column_config.NumberColumn("Total Required Quantity", min_value=0.0, format="%.1f", step=1.0),
-            "Fulfillment Progress": st.column_config.ProgressColumn("Fulfillment % Plan", min_value=0.0, max_value=1.0, format="%f")
-        }, 
-        num_rows="fixed", 
-        use_container_width=True, 
-        key="summary_matrix_editor"
-    )
-    
-    if st.button("💾 Save Manual Material Adjustments"):
-        save_targets_df = edited_summary_df[["Interior Material Category", "Total Required Quantity"]].copy()
-        save_targets_df.columns = ["Material Type", "Target"]
-        save_targets_df.to_csv(TARGET_FILE, index=False)
-        st.success("Interior fit-out project targets updated successfully!")
-        st.rerun()
+                        st.error(f"Failed to parse Excel file rows: {e}")

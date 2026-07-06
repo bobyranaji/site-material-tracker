@@ -209,8 +209,8 @@ with tab2:
                 c1, c2, c3 = st.columns(3)
                 c1.write(f"**Supplier:** {row['Supplier']}")
                 c2.write(f"**MIR Status:** {row['MIR Status']} ({row['MIR Ref No']})")
-                doc_file_str = str(row["Combined Document File"]) if "Combined Document File" in row and pd.notna(row["Combined Document File"]) else ""
                 
-                # Fixed alignment indentation block safely below
+                # Flattened layout tracking paths directly to clear nesting indentation risks 
+                doc_file_str = str(row["Combined Document File"]) if "Combined Document File" in row and pd.notna(row["Combined Document File"]) else ""
                 if os.path.exists(doc_file_str):
-                    with open(doc_file_str, "rb") as file_doc:
+                    file_data = open(doc_file_str, "rb").read()

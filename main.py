@@ -16,9 +16,6 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 DB_FILE = "material_ledger.csv"
 TARGET_FILE = "project_targets.csv"
 
-# Foundational List
-DEFAULT_MATERIALS = ["Cement", "Gypsum Board", "Partition Channel", "Ceiling Framing Material", "Tiles", "Marble", "Glazing"]
-
 def load_ledger():
     if os.path.exists(DB_FILE):
         try:
@@ -32,22 +29,15 @@ def load_targets():
     if os.path.exists(TARGET_FILE):
         try:
             stored_df = pd.read_csv(TARGET_FILE)
-            for _, row in stored_df.iterrows():
-                targets_dict[str(row["Material Type"]).strip()] = float(row["Target"])
+            if "Material Type" in stored_df.columns and "Target" in stored_df.columns:
+                for _, row in stored_df.iterrows():
+                    targets_dict[str(row["Material Type"]).strip()] = float(row["Target"])
         except Exception:
             pass
     return targets_dict
 
 ledger_df = load_ledger()
 saved_targets = load_targets()
-
-# Gather unique material list dynamically from database history rows
-if not ledger_df.empty:
-    ledger_materials = ledger_df["Material Type"].dropna().unique().tolist()
-else:
-    ledger_materials = []
-
-all_active_materials = sorted(list(set(DEFAULT_MATERIALS + ledger_materials)))
 
 # ==========================================
 # 2. AI EXTRACTION ENGINE (GEMINI)
@@ -65,16 +55,15 @@ def extract_document_data(api_key, invoice_file, mir_file, existing_categories):
         
         INSTRUCTION FOR MATERIAL TYPE IDENTIFICATION:
         1. Look at the item description on the invoice.
-        2. First, try to match it cleanly to one of our existing site categories if relevant: {', '.join(existing_categories)}.
-        3. CRITICAL: If the material found is a completely brand new type or item not mentioned in that list, DO NOT use "Other". Instead, extract and clean its actual trade or commodity name from the invoice description text (e.g., "Granite", "Paint", "Plywood", "Screws") and use that as the "Material Type". Keep names concise (1 to 4 words max).
+        2. Clean and extract its trade or commodity name from the text description (e.g., "Cement", "Granite", "Paint", "Plywood", "Tiles"). Keep names concise (1 to 3 words max).
 
-        Format your final response strictly as a JSON list of objects matching this exact template layout. Do not wrap in markdown or code blocks:
+        Format your response strictly as a JSON list of objects matching this template layout. Do not wrap in markdown or backticks:
         [
             {{
                 "Delivery Date": "YYYY-MM-DD",
                 "Invoice No": "string",
                 "Supplier": "string",
-                "Material Type": "The matched or brand new extracted category name",
+                "Material Type": "The extracted commodity name",
                 "Quantity": 0.0,
                 "Unit": "string",
                 "MIR Ref No": "string",
@@ -86,7 +75,7 @@ def extract_document_data(api_key, invoice_file, mir_file, existing_categories):
         clean_text = response.text.replace("```json", "").replace("```python", "").replace("```", "").strip()
         return json.loads(clean_text)
     except Exception as e:
-        st.error(f"AI multi-row parsing failed: {e}.")
+        st.error(f"AI parsing failed: {e}.")
         return None
 
 # ==========================================
@@ -113,7 +102,8 @@ with tab1:
             st.warning("Please provide an API Key first!")
         elif inv_upload and mir_upload:
             with st.spinner("AI parsing all line items dynamically..."):
-                extracted_list = extract_document_data(api_key, inv_upload, mir_upload, all_active_materials)
+                # Pass dummy list since we are pulling raw descriptors directly
+                extracted_list = extract_document_data(api_key, inv_upload, mir_upload, [])
                 if extracted_list:
                     for item in extracted_list:
                         try:
@@ -127,8 +117,6 @@ with tab1:
 
     if 'parsed_items' in st.session_state:
         st.subheader("📝 Step 2: Review and Edit Extracted Items")
-        st.info("You can add temporary categories or double-click to clean text strings directly in the layout grid below.")
-        
         preview_df = pd.DataFrame(st.session_state['parsed_items'])
         
         edited_df = st.data_editor(
@@ -158,7 +146,7 @@ with tab1:
                 updated_df = pd.concat([ledger_df, edited_df], ignore_index=True)
                 updated_df.to_csv(DB_FILE, index=False)
                 
-                st.success("All items successfully processed and ledger synchronized!")
+                st.success("All items successfully saved!")
                 del st.session_state['parsed_items']
                 st.rerun()
 
@@ -168,9 +156,11 @@ with tab1:
 with tab2:
     st.header("Site Material Inventory Ledger Log")
     if not ledger_df.empty:
+        # Gather dynamic names to populate filters accurately
+        active_mats = sorted(ledger_df["Material Type"].dropna().unique().tolist())
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            f_mat = st.multiselect("Filter by Material Category", all_active_materials, default=all_active_materials)
+            f_mat = st.multiselect("Filter by Material Category", active_mats, default=active_mats)
         with col_f2:
             unique_suppliers = ledger_df["Supplier"].dropna().unique().tolist()
             f_vendor = st.multiselect("Filter by Supplier Vendor", unique_suppliers, default=unique_suppliers)
@@ -199,11 +189,25 @@ with tab2:
         st.info("No delivery records compiled inside storage records yet.")
 
 # ------------------------------------------
-# TAB 3: PROJECT ANALYTICS (UPGRADED LAYOUT GRID)
+# TAB 3: PROJECT ANALYTICS (DYNAMIC PROGRESS BAR GRID)
 # ------------------------------------------
 with tab3:
-    st.header("📈 Material Procurement Summary Matrix")
-    st.info("💡 Instructions: Use the table grid below to add or adjust your 'Total Required Quantity' values. The Fulfilled Delivery % calculates automatically. Remember to click Save at the bottom to hold changes!")
-
-    analytics_rows = []
+    st.header("📈 Dynamic Material Procurement Summary")
     
+    # Check if there are active entries in our ledger database
+    if not ledger_df.empty:
+        # Step 1: Pull only materials that have been delivered to site
+        delivered_materials = sorted(ledger_df["Material Type"].dropna().unique().tolist())
+        
+        analytics_rows = []
+        for mat in delivered_materials:
+            # Aggregate passed quantities
+            match_rows = ledger_df[(ledger_df["Material Type"] == mat) & (ledger_df["MIR Status"] == "Passed")]
+            total_delivered = float(match_rows["Quantity"].sum())
+            
+            # Fetch common unit designation from historical context rows
+            unit_label = "Units"
+            if not match_rows.empty and "Unit" in match_rows.columns:
+                unit_label = str(match_rows["Unit"].dropna().iloc[0])
+                
+            # Fetch saved plan configuration requirement targets

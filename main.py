@@ -41,13 +41,12 @@ def load_targets():
 ledger_df = load_ledger()
 saved_targets = load_targets()
 
-# Gather every single unique material name currently sitting in our ledger database
+# Gather unique material list dynamically from database history rows
 if not ledger_df.empty:
     ledger_materials = ledger_df["Material Type"].dropna().unique().tolist()
 else:
     ledger_materials = []
 
-# Merge default list with any new unique materials found in the ledger database rows
 all_active_materials = sorted(list(set(DEFAULT_MATERIALS + ledger_materials)))
 
 # ==========================================
@@ -135,7 +134,7 @@ with tab1:
         edited_df = st.data_editor(
             preview_df,
             column_config={
-                "Material Type": st.column_config.TextColumn("Material Category", help="Clean or change the category name directly here", required=True),
+                "Material Type": st.column_config.TextColumn("Material Category", required=True),
                 "Delivery Date": st.column_config.DateColumn("Date", required=True),
                 "Quantity": st.column_config.NumberColumn("Qty", min_value=0.0, format="%.2f")
             },
@@ -200,8 +199,11 @@ with tab2:
         st.info("No delivery records compiled inside storage records yet.")
 
 # ------------------------------------------
-# TAB 3: PROJECT ANALYTICS (ISOLATED & BULLETPROOF)
+# TAB 3: PROJECT ANALYTICS (UPGRADED LAYOUT GRID)
 # ------------------------------------------
 with tab3:
-    st.header("📈 Material Procurement Target Tracking Matrix")
-    st.subheader("1. Configure Total Contract Quantities Required on Site")
+    st.header("📈 Material Procurement Summary Matrix")
+    st.info("💡 Instructions: Use the table grid below to add or adjust your 'Total Required Quantity' values. The Fulfilled Delivery % calculates automatically. Remember to click Save at the bottom to hold changes!")
+
+    analytics_rows = []
+    

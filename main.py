@@ -10,12 +10,30 @@ from pypdf import PdfReader
 # ==========================================
 # 1. SETUP & CONFIGURATION
 # ==========================================
-st.set_page_config(page_title="Site Material Tracker", layout="wide")
+st.set_page_config(page_title="Interior Fitout Material Tracker", layout="wide")
 
 UPLOAD_DIR = "stored_documents"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 DB_FILE = "material_ledger.csv"
 TARGET_FILE = "project_targets.csv"
+
+# Pre-defined checklist optimized for Interior Fit-out scopes
+FITOUT_MATERIALS = [
+    "Gypsum Board", 
+    "Partition Channel", 
+    "Ceiling Framing Material", 
+    "Tiles", 
+    "Marble", 
+    "Glazing / Glass Panels", 
+    "Wall Paint", 
+    "Acoustic Ceiling Tiles",
+    "Plywood / MDF Boards",
+    "Laminates / Veneer",
+    "Hardware Locks & Hinges",
+    "Electrical Conduit Pipes",
+    "LED Light Fixtures",
+    "Other Fitout Items"
+]
 
 def load_ledger():
     if os.path.exists(DB_FILE):
@@ -25,27 +43,22 @@ def load_ledger():
             pass
     return pd.DataFrame(columns=["Delivery Date", "Invoice No", "Supplier", "Material Type", "Quantity", "Unit", "MIR Ref No", "MIR Status", "Combined Document File"])
 
-def load_targets_df():
+def load_targets():
+    targets_dict = {mat: 0.0 for mat in FITOUT_MATERIALS}
     if os.path.exists(TARGET_FILE):
         try:
-            df = pd.read_csv(TARGET_FILE)
-            if "Material Type" in df.columns and "Total Required Quantity" in df.columns:
-                return df
+            stored_df = pd.read_csv(TARGET_FILE)
+            for _, row in stored_df.iterrows():
+                # Flexible string reading to bind keys safely
+                mat_name = str(row.iloc[0]).strip()
+                target_val = float(row.iloc[1])
+                targets_dict[mat_name] = target_val
         except Exception:
             pass
-    # Default seed table if no BOQ sheet has been uploaded yet
-    default_mats = ["Cement", "Gypsum Board", "Partition Channel", "Ceiling Framing Material", "Tiles", "Marble", "Glazing"]
-    return pd.DataFrame({
-        "Material Category": default_mats,
-        "Total Required Quantity": [0.0] * len(default_mats)
-    })
+    return targets_dict
 
 ledger_df = load_ledger()
-targets_df = load_targets_df()
-
-# Clean up column structural headers for relational mapping operations
-if "Material Type" in targets_df.columns:
-    targets_df = targets_df.rename(columns={"Material Type": "Material Category", "Target": "Total Required Quantity"})
+saved_targets = load_targets()
 
 def get_pdf_text(file_buffer):
     reader = PdfReader(file_buffer)
@@ -67,22 +80,23 @@ def extract_combined_document(api_key, combined_file):
         else:
             content_payload = Image.open(combined_file)
         
-        prompt = """
-        Analyze this construction site document data, which contains both a Material Delivery Invoice and its matching Material Inspection Report (MIR) attached together.
-        Extract ALL unique material line items found. Simplify trade descriptors concisely (e.g., "Cement", "Granite", "Tiles").
+        prompt = f"""
+        Analyze this construction site document data (Invoice + MIR).
+        Extract ALL unique material line items found. 
+        Try to group or map them cleanly into one of these interior fit-out categories if possible: {', '.join(FITOUT_MATERIALS)}.
         
-        Format your final response strictly as a JSON list of objects matching this precise template layout. Do not wrap in markdown or backticks:
+        Format your final response strictly as a JSON list of objects matching this layout. No markdown or backticks:
         [
-            {
+            {{
                 "Delivery Date": "YYYY-MM-DD",
                 "Invoice No": "string",
                 "Supplier": "string",
-                "Material Type": "The clean extracted commodity name",
+                "Material Type": "The mapped trade or commodity name",
                 "Quantity": 0.0,
                 "Unit": "string",
                 "MIR Ref No": "string",
                 "MIR Status": "Passed or Failed"
-            }
+            }}
         ]
         """
         response = model.generate_content([prompt, content_payload])
@@ -98,25 +112,21 @@ def extract_boq_document(api_key, boq_file):
         model = genai.GenerativeModel('gemini-2.5-flash')
         
         if boq_file.name.lower().endswith('.pdf'):
-            content_payload = f"BOQ Sheet Document Text Contents:\n{get_pdf_text(boq_file)}"
+            content_payload = f"BOQ Text Contents:\n{get_pdf_text(boq_file)}"
         else:
             content_payload = Image.open(boq_file)
             
-        prompt = """
-        Analyze this Project Bill of Quantities (BOQ) structural estimation document.
-        Scan the schedule of items and extract every single material category along with its estimated total contract quantity required for the project.
-        
-        CRITICAL INSTRUCTIONS:
-        1. Clean up multi-line descriptions into clear, concise material names (1 to 3 words max, e.g., "Cement", "Gypsum Board", "Tiles", "Structural Steel").
-        2. Combine duplicate lines if the same material appears multiple times by summing up their totals.
-        3. Extract the clean estimated number value for the total quantity required.
+        prompt = f"""
+        Analyze this Interior Fit-out Project Bill of Quantities (BOQ) document.
+        Extract the contract quantity required for each material item. Map them cleanly to these fit-out headings: {', '.join(FITOUT_MATERIALS)}.
+        Sum up the quantities if a material appears multiple times in different rooms/floors.
 
-        Format your final response strictly as a JSON list of objects matching this precise template layout. Do not wrap in markdown or backticks:
+        Format your final response strictly as a JSON list of objects matching this layout. No markdown or backticks:
         [
-            {
-                "Material Category": "Concise clean material name",
+            {{
+                "Material Category": "The matching fit-out category name",
                 "Total Required Quantity": 0.0
-            }
+            }}
         ]
         """
         response = model.generate_content([prompt, content_payload])
@@ -129,7 +139,7 @@ def extract_boq_document(api_key, boq_file):
 # ==========================================
 # 3. USER INTERFACE LAYOUT
 # ==========================================
-st.title("🏗️ Smart Site Material Tracker & Reconciler")
+st.title("🏗️ Smart Interior Fitout Material Tracker")
 tab1, tab2, tab3 = st.tabs(["📋 Document Inwarding", "📊 Master Ledger & Reconciliation", "📈 Project Analytics"])
 
 # ------------------------------------------
@@ -164,7 +174,7 @@ with tab1:
         edited_df = st.data_editor(
             preview_df,
             column_config={
-                "Material Type": st.column_config.TextColumn("Material Category", required=True),
+                "Material Type": st.column_config.SelectboxColumn("Material Category", options=FITOUT_MATERIALS, required=True),
                 "Delivery Date": st.column_config.DateColumn("Date", required=True),
                 "Quantity": st.column_config.NumberColumn("Qty", min_value=0.0, format="%.2f")
             },
@@ -193,14 +203,10 @@ with tab1:
 # ------------------------------------------
 with tab2:
     st.header("Site Material Inventory Ledger Log")
-    
-    # Dynamically extract all material types currently across active delivery records
-    active_mats = sorted(list(set(targets_df["Material Category"].dropna().tolist() + (ledger_df["Material Type"].dropna().unique().tolist() if not ledger_df.empty else []))))
-    
     if not ledger_df.empty:
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            f_mat = st.multiselect("Filter by Material Category", active_mats, default=active_mats)
+            f_mat = st.multiselect("Filter by Material Category", FITOUT_MATERIALS, default=FITOUT_MATERIALS)
         with col_f2:
             unique_suppliers = ledger_df["Supplier"].dropna().unique().tolist()
             f_vendor = st.multiselect("Filter by Supplier Vendor", unique_suppliers, default=unique_suppliers)
@@ -213,3 +219,9 @@ with tab2:
                 c1.write(f"**Supplier:** {row['Supplier']}")
                 c2.write(f"**MIR Status:** {row['MIR Status']} ({row['MIR Ref No']})")
                 
+                doc_file_str = str(row["Combined Document File"]) if "Combined Document File" in row and pd.notna(row["Combined Document File"]) else ""
+                if os.path.exists(doc_file_str):
+                    file_data = open(doc_file_str, "rb").read()
+                    c3.download_button(label="📥 Download Combined Doc", data=file_data, file_name=os.path.basename(doc_file_str), key=f"doc_{index}")
+                    
+        st.download_button(label="📊 Export Full Ledger Log to CSV", data=filtered_df.to_csv(index=False), file_name="site_reconciliation_report.csv", mime="text/csv")

@@ -184,30 +184,67 @@ with tab2:
 with tab3:
     st.header("📈 Dynamic Material Procurement Summary")
     st.subheader("🗂️ Step 1: Upload Project Estimation sheet (BOQ)")
-    st.info("Attach your project BOQ sheet (PDF, PNG, or JPG). The AI reads it and updates the Required Quantity column automatically.")
+    st.info("Attach your project BOQ sheet (Excel, PDF, or Image scan). The AI reads it or extracts the values automatically.")
     
-    api_key_t3 = st.text_input("Enter Gemini API Key to enable BOQ scanning:", type="password", key="api_key_t3")
-    boq_upload = st.file_uploader("Upload Project BOQ File (PDF / Image Scan)", type=["pdf", "png", "jpg", "jpeg"], key="upload_t3")
+    api_key_t3 = st.text_input("Enter Gemini API Key to enable BOQ scanning (Only needed for PDF/Images):", type="password", key="api_key_t3")
+    
+    # UNLOCKED: Accepts excel formats (.xlsx, .xls) alongside standard media types
+    boq_upload = st.file_uploader("Upload Project BOQ File (Excel / PDF / Image)", type=["xlsx", "xls", "pdf", "png", "jpg", "jpeg"], key="upload_t3")
     
     if st.button("🤖 Analyze & Extract Quantities from BOQ"):
-        if not api_key_t3: st.warning("Please provide your Gemini API key first!")
-        elif boq_upload:
-            with st.spinner("AI parsing item codes and quantities from BOQ document..."):
-                parsed_boq = extract_boq_document(api_key_t3, boq_upload)
-                if parsed_boq:
-                    clean_save_dict = {mat: 0.0 for mat in FITOUT_MATERIALS}
-                    for entry in parsed_boq:
-                        m_cat = str(entry.get("Material Category", "")).strip()
-                        m_qty = float(entry.get("Total Required Quantity", 0.0))
-                        if m_cat in clean_save_dict:
-                            clean_save_dict[m_cat] = m_qty
-                    
-                    save_targets_df = pd.DataFrame(list(clean_save_dict.items()), columns=["Material Type", "Target"])
-                    save_targets_df.to_csv(TARGET_FILE, index=False)
-                    st.success("Successfully generated and saved requirements from BOQ document!")
-                    st.rerun()
+        if boq_upload:
+            file_name = boq_upload.name.lower()
+            
+            # AUTOMATED EXCEL PARSING: If it is an Excel sheet, read it directly via pandas instantly
+            if file_name.endswith('.xlsx') or file_name.endswith('.xls'):
+                with st.spinner("Reading Excel file lines directly..."):
+                    try:
+                        excel_df = pd.read_excel(boq_upload)
+                        # Ask Gemini to map the column descriptions from the clean spreadsheet structure
+                        genai.configure(api_key=api_key_t3 if api_key_t3 else "dummy_key")
+                        model = genai.GenerativeModel('gemini-2.5-flash')
+                        
+                        excel_sample = excel_df.head(40).to_string()
+                        prompt_excel = f"""
+                        Analyze this construction sheet column data data:
+                        {excel_sample}
+                        
+                        Map the matching item categories and total volume quantities to these headings: {', '.join(FITOUT_MATERIALS)}.
+                        Format response strictly as a clean JSON list, no markdown or backticks:
+                        [
+                            {{ "Material Category": "Category name", "Total Required Quantity": 0.0 }}
+                        ]
+                        """
+                        response = model.generate_content(prompt_excel)
+                        clean_text = response.text.replace("```json", "").replace("```python", "").replace("```", "").strip()
+                        parsed_boq = json.loads(clean_text)
+                    except Exception as e:
+                        st.error(f"Failed to parse Excel file rows: {e}. If this persists, ensure your columns are formatted clearly.")
+                        parsed_boq = None
+            else:
+                # Standard scan fallback for PDFs or Image captures
+                if not api_key_t3:
+                    st.warning("Please provide your Gemini API key first to parse PDF/Image files!")
+                    parsed_boq = None
+                else:
+                    with st.spinner("AI parsing item codes and quantities from document layout..."):
+                        parsed_boq = extract_boq_document(api_key_t3, boq_upload)
+            
+            # Commit the structured arrays to database disk profiles
+            if parsed_boq:
+                clean_save_dict = {mat: 0.0 for mat in FITOUT_MATERIALS}
+                for entry in parsed_boq:
+                    m_cat = str(entry.get("Material Category", "")).strip()
+                    m_qty = float(entry.get("Total Required Quantity", 0.0))
+                    if m_cat in clean_save_dict:
+                        clean_save_dict[m_cat] = m_qty
+                
+                save_targets_df = pd.DataFrame(list(clean_save_dict.items()), columns=["Material Type", "Target"])
+                save_targets_df.to_csv(TARGET_FILE, index=False)
+                st.success("Successfully generated and saved requirements from BOQ document!")
+                st.rerun()
         else:
-            st.error("Please select a BOQ document file first.")
+            st.error("Please select a BOQ spreadsheet or document file first.")
             
     st.subheader("📊 Step 2: Interior Fit-out Requirements & Progress Matrix")
     st.info("💡 Instructions: View material categories below. Click the 'Total Required Quantity' cells to adjust goals manually. Fulfillment percentage updates instantly.")

@@ -17,13 +17,15 @@ DB_FILE = "material_ledger.csv"
 TARGET_FILE = "project_targets.csv"
 LIST_FILE = "material_list.csv"
 
-# Core Seed List to initialize system
+# Core Seed List to initialize system fallback profiles safely
 DEFAULT_MATERIALS = ["Cement", "Gypsum Board", "Partition Channel", "Ceiling Framing Material", "Tiles", "Marble", "Glazing"]
 
 def load_material_list():
     if os.path.exists(LIST_FILE):
         try:
-            return pd.read_csv(LIST_FILE)["Material Type"].dropna().unique().tolist()
+            stored_list = pd.read_csv(LIST_FILE)["Material Type"].dropna().unique().tolist()
+            if len(stored_list) > 0:
+                return stored_list
         except Exception:
             pass
     return DEFAULT_MATERIALS.copy()

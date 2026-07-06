@@ -192,3 +192,65 @@ with tab3:
     if st.button("🤖 Analyze & Extract Quantities from BOQ"):
         if not api_key_t3: st.warning("Please provide your Gemini API key first!")
         elif boq_upload:
+            with st.spinner("AI parsing item codes and quantities from BOQ document..."):
+                parsed_boq = extract_boq_document(api_key_t3, boq_upload)
+                if parsed_boq:
+                    clean_save_dict = {mat: 0.0 for mat in FITOUT_MATERIALS}
+                    for entry in parsed_boq:
+                        m_cat = str(entry.get("Material Category", "")).strip()
+                        m_qty = float(entry.get("Total Required Quantity", 0.0))
+                        if m_cat in clean_save_dict:
+                            clean_save_dict[m_cat] = m_qty
+                    
+                    save_targets_df = pd.DataFrame(list(clean_save_dict.items()), columns=["Material Type", "Target"])
+                    save_targets_df.to_csv(TARGET_FILE, index=False)
+                    st.success("Successfully generated and saved requirements from BOQ document!")
+                    st.rerun()
+        else:
+            st.error("Please select a BOQ document file first.")
+            
+    st.subheader("📊 Step 2: Interior Fit-out Requirements & Progress Matrix")
+    st.info("💡 Instructions: View material categories below. Click the 'Total Required Quantity' cells to adjust goals manually. Fulfillment percentage updates instantly.")
+
+    analytics_rows = []
+    for mat in FITOUT_MATERIALS:
+        total_delivered = 0.0
+        unit_label = "Units"
+        if not ledger_df.empty:
+            match_rows = ledger_df[(ledger_df["Material Type"] == mat) & (ledger_df["MIR Status"] == "Passed")]
+            total_delivered = float(match_rows["Quantity"].sum())
+            if not match_rows.empty and "Unit" in match_rows.columns:
+                unit_label = str(match_rows["Unit"].dropna().iloc[0])
+                
+        target_qty = float(saved_targets.get(mat, 0.0))
+        progress_ratio = min(total_delivered / target_qty, 1.0) if target_qty > 0 else 0.0
+            
+        analytics_rows.append({
+            "Interior Material Category": mat,
+            "Total Delivered Qty": total_delivered,
+            "Unit": unit_label,
+            "Total Required Quantity": target_qty,
+            "Fulfillment Progress": progress_ratio
+        })
+        
+    summary_df = pd.DataFrame(analytics_rows)
+    edited_summary_df = st.data_editor(
+        summary_df, 
+        column_config={
+            "Interior Material Category": st.column_config.TextColumn("Interior Material Category", disabled=True),
+            "Total Delivered Qty": st.column_config.NumberColumn("Total Delivered Qty", disabled=True, format="%.1f"),
+            "Unit": st.column_config.TextColumn("Unit", disabled=True),
+            "Total Required Quantity": st.column_config.NumberColumn("Total Required Quantity", min_value=0.0, format="%.1f", step=1.0),
+            "Fulfillment Progress": st.column_config.ProgressColumn("Fulfillment % Plan", min_value=0.0, max_value=1.0, format="%f")
+        }, 
+        num_rows="fixed", 
+        use_container_width=True, 
+        key="summary_matrix_editor"
+    )
+    
+    if st.button("💾 Save Manual Material Adjustments"):
+        save_targets_df = edited_summary_df[["Interior Material Category", "Total Required Quantity"]].copy()
+        save_targets_df.columns = ["Material Type", "Target"]
+        save_targets_df.to_csv(TARGET_FILE, index=False)
+        st.success("Interior fit-out project targets updated successfully!")
+        st.rerun()

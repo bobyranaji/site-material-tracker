@@ -25,28 +25,27 @@ def load_ledger():
             pass
     return pd.DataFrame(columns=["Delivery Date", "Invoice No", "Supplier", "Material Type", "Quantity", "Unit", "MIR Ref No", "MIR Status", "Combined Document File"])
 
-def load_targets():
-    targets_dict = {}
+def load_targets_df():
     if os.path.exists(TARGET_FILE):
         try:
-            stored_df = pd.read_csv(TARGET_FILE)
-            if "Material Type" in stored_df.columns and "Target" in stored_df.columns:
-                for _, row in stored_df.iterrows():
-                    targets_dict[str(row["Material Type"]).strip()] = float(row["Target"])
+            df = pd.read_csv(TARGET_FILE)
+            if "Material Type" in df.columns and "Total Required Quantity" in df.columns:
+                return df
         except Exception:
             pass
-    return targets_dict
+    # Default seed table if no BOQ sheet has been uploaded yet
+    default_mats = ["Cement", "Gypsum Board", "Partition Channel", "Ceiling Framing Material", "Tiles", "Marble", "Glazing"]
+    return pd.DataFrame({
+        "Material Category": default_mats,
+        "Total Required Quantity": [0.0] * len(default_mats)
+    })
 
 ledger_df = load_ledger()
-saved_targets = load_targets()
+targets_df = load_targets_df()
 
-if not ledger_df.empty:
-    ledger_materials = ledger_df["Material Type"].dropna().unique().tolist()
-else:
-    ledger_materials = []
-
-DEFAULT_METERIALS = ["Cement", "Gypsum Board", "Partition Channel", "Ceiling Framing Material", "Tiles", "Marble", "Glazing"]
-all_active_materials = sorted(list(set(DEFAULT_METERIALS + ledger_materials)))
+# Clean up column structural headers for relational mapping operations
+if "Material Type" in targets_df.columns:
+    targets_df = targets_df.rename(columns={"Material Type": "Material Category", "Target": "Total Required Quantity"})
 
 def get_pdf_text(file_buffer):
     reader = PdfReader(file_buffer)
@@ -115,8 +114,8 @@ def extract_boq_document(api_key, boq_file):
         Format your final response strictly as a JSON list of objects matching this precise template layout. Do not wrap in markdown or backticks:
         [
             {
-                "Material Type": "Concise clean material name",
-                "Target Quantity": 0.0
+                "Material Category": "Concise clean material name",
+                "Total Required Quantity": 0.0
             }
         ]
         """
@@ -194,10 +193,14 @@ with tab1:
 # ------------------------------------------
 with tab2:
     st.header("Site Material Inventory Ledger Log")
+    
+    # Dynamically extract all material types currently across active delivery records
+    active_mats = sorted(list(set(targets_df["Material Category"].dropna().tolist() + (ledger_df["Material Type"].dropna().unique().tolist() if not ledger_df.empty else []))))
+    
     if not ledger_df.empty:
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            f_mat = st.multiselect("Filter by Material Category", all_active_materials, default=all_active_materials)
+            f_mat = st.multiselect("Filter by Material Category", active_mats, default=active_mats)
         with col_f2:
             unique_suppliers = ledger_df["Supplier"].dropna().unique().tolist()
             f_vendor = st.multiselect("Filter by Supplier Vendor", unique_suppliers, default=unique_suppliers)
@@ -210,7 +213,3 @@ with tab2:
                 c1.write(f"**Supplier:** {row['Supplier']}")
                 c2.write(f"**MIR Status:** {row['MIR Status']} ({row['MIR Ref No']})")
                 
-                # Flattened layout tracking paths directly to clear nesting indentation risks 
-                doc_file_str = str(row["Combined Document File"]) if "Combined Document File" in row and pd.notna(row["Combined Document File"]) else ""
-                if os.path.exists(doc_file_str):
-                    file_data = open(doc_file_str, "rb").read()

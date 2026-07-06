@@ -40,17 +40,14 @@ def load_targets():
 ledger_df = load_ledger()
 saved_targets = load_targets()
 
-# Gather dynamic unique lists reflecting current inventory histories 
 if not ledger_df.empty:
     ledger_materials = ledger_df["Material Type"].dropna().unique().tolist()
 else:
     ledger_materials = []
 
-# Merge default placeholders with structural ledger lines cleanly
 DEFAULT_METERIALS = ["Cement", "Gypsum Board", "Partition Channel", "Ceiling Framing Material", "Tiles", "Marble", "Glazing"]
 all_active_materials = sorted(list(set(DEFAULT_METERIALS + ledger_materials)))
 
-# Helper helper framework parsing text fields from uploaded PDFs
 def get_pdf_text(file_buffer):
     reader = PdfReader(file_buffer)
     pdf_text = ""
@@ -213,4 +210,7 @@ with tab2:
                 c1.write(f"**Supplier:** {row['Supplier']}")
                 c2.write(f"**MIR Status:** {row['MIR Status']} ({row['MIR Ref No']})")
                 doc_file_str = str(row["Combined Document File"]) if "Combined Document File" in row and pd.notna(row["Combined Document File"]) else ""
+                
+                # Fixed alignment indentation block safely below
                 if os.path.exists(doc_file_str):
+                    with open(doc_file_str, "rb") as file_doc:

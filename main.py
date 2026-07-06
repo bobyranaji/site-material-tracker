@@ -102,7 +102,6 @@ with tab1:
             st.warning("Please provide an API Key first!")
         elif inv_upload and mir_upload:
             with st.spinner("AI parsing all line items dynamically..."):
-                # Pass dummy list since we are pulling raw descriptors directly
                 extracted_list = extract_document_data(api_key, inv_upload, mir_upload, [])
                 if extracted_list:
                     for item in extracted_list:
@@ -156,7 +155,6 @@ with tab1:
 with tab2:
     st.header("Site Material Inventory Ledger Log")
     if not ledger_df.empty:
-        # Gather dynamic names to populate filters accurately
         active_mats = sorted(ledger_df["Material Type"].dropna().unique().tolist())
         col_f1, col_f2 = st.columns(2)
         with col_f1:
@@ -194,20 +192,26 @@ with tab2:
 with tab3:
     st.header("📈 Dynamic Material Procurement Summary")
     
-    # Check if there are active entries in our ledger database
     if not ledger_df.empty:
-        # Step 1: Pull only materials that have been delivered to site
         delivered_materials = sorted(ledger_df["Material Type"].dropna().unique().tolist())
         
         analytics_rows = []
         for mat in delivered_materials:
-            # Aggregate passed quantities
             match_rows = ledger_df[(ledger_df["Material Type"] == mat) & (ledger_df["MIR Status"] == "Passed")]
             total_delivered = float(match_rows["Quantity"].sum())
             
-            # Fetch common unit designation from historical context rows
             unit_label = "Units"
             if not match_rows.empty and "Unit" in match_rows.columns:
                 unit_label = str(match_rows["Unit"].dropna().iloc[0])
                 
-            # Fetch saved plan configuration requirement targets
+            target_qty = float(saved_targets.get(mat, 0.0))
+            
+            fraction_val = 0.0
+            if target_qty > 0:
+                fraction_val = min(total_delivered / target_qty, 1.0)
+                
+            analytics_rows.append({
+                "Material Category": mat,
+                "Total Delivered Till Now": total_delivered,
+                "Unit": unit_label,
+                "Total Required Quantity": target_qty,

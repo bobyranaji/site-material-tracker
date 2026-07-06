@@ -5,6 +5,7 @@ import datetime
 from google import generativeai as genai
 from PIL import Image
 import json
+from pypdf import PdfReader
 
 # ==========================================
 # 1. SETUP & CONFIGURATION
@@ -40,23 +41,34 @@ ledger_df = load_ledger()
 saved_targets = load_targets()
 
 # ==========================================
-# 2. COMBINED DOCUMENT AI ENGINE (GEMINI)
+# 2. COMBINED PDF / IMAGE AI ENGINE (GEMINI)
 # ==========================================
 def extract_combined_document(api_key, combined_file):
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # Load image or pass file data directly to Gemini
-        doc_img = Image.open(combined_file)
+        # Check if the uploaded file is a PDF or an Image
+        if combined_file.name.lower().endswith('.pdf'):
+            # If PDF, read the text out of the pages first
+            reader = PdfReader(combined_file)
+            pdf_text = ""
+            for page in reader.pages:
+                pdf_text += page.extract_text() + "\n"
+            
+            # Use the text contents for Gemini analysis
+            content_payload = f"Document Text Contents:\n{pdf_text}"
+        else:
+            # If Image, process using the standard image framework
+            content_payload = Image.open(combined_file)
         
         prompt = """
-        Analyze this combined construction site document, which contains both a Material Delivery Invoice and its matching Material Inspection Report (MIR) attached together.
+        Analyze this construction site document data, which contains both a Material Delivery Invoice and its matching Material Inspection Report (MIR) attached together.
         
-        Carefully scan all pages/sections of the document and extract ALL material line items found.
+        Carefully scan all contents and extract ALL unique material line items found.
         
         INSTRUCTION FOR MATERIAL TYPE IDENTIFICATION:
-        - Look at the item descriptions listed in the document.
+        - Look closely at the item descriptions listed in the document text/image.
         - Clean and extract its clear trade name or commodity description (e.g., "Cement", "Granite", "Paint", "Plywood", "Tiles"). Keep names short and punchy (1 to 3 words max).
 
         Format your final response strictly as a JSON list of objects matching this precise template layout. Do not wrap in markdown text blocks or backticks:
@@ -73,11 +85,11 @@ def extract_combined_document(api_key, combined_file):
             }
         ]
         """
-        response = model.generate_content([prompt, doc_img])
+        response = model.generate_content([prompt, content_payload])
         clean_text = response.text.replace("```json", "").replace("```python", "").replace("```", "").strip()
         return json.loads(clean_text)
     except Exception as e:
-        st.error(f"AI parsing failed: {e}. Ensure the uploaded image is clear.")
+        st.error(f"AI parsing failed: {e}. Ensure the uploaded file is clear and readable.")
         return None
 
 # ==========================================
@@ -87,16 +99,16 @@ st.title("🏗️ Smart Site Material Tracker & Reconciler")
 tab1, tab2, tab3 = st.tabs(["📋 Document Inwarding", "📊 Master Ledger & Reconciliation", "📈 Project Analytics"])
 
 # ------------------------------------------
-# TAB 1: DOCUMENT INWARDING (ONE UPLOADER BOX)
+# TAB 1: DOCUMENT INWARDING (UPDATED FOR PDF)
 # ------------------------------------------
 with tab1:
     st.header("Scan & Upload Combined Document")
-    st.info("💡 Attach the scanned single file that contains both the invoice and the inspection report (MIR) together.")
+    st.info("💡 Attach the scanned single file that contains both the invoice and the inspection report (MIR) together. Accepts PDF, PNG, and JPG formats.")
     
     api_key = st.text_input("Enter Gemini API Key to enable AI scanning:", type="password")
     
-    # Unified uploader box
-    combined_upload = st.file_uploader("Upload Combined Invoice + MIR Document (Image/PNG/JPG)", type=["png", "jpg", "jpeg"])
+    # Unified uploader box unlocked for PDFs
+    combined_upload = st.file_uploader("Upload Combined Invoice + MIR Document (PDF / Image)", type=["pdf", "png", "jpg", "jpeg"])
         
     if st.button("🚀 Analyze Combined Document"):
         if not api_key:
@@ -113,7 +125,7 @@ with tab1:
                     st.session_state['parsed_items'] = extracted_list
                     st.success(f"Successfully extracted {len(extracted_list)} material rows from the document!")
         else:
-            st.error("Please upload the combined document file first.")
+            st.error("Please upload a combined document file first.")
 
     if 'parsed_items' in st.session_state:
         st.subheader("📝 Step 2: Review and Edit Extracted Items")
@@ -141,7 +153,6 @@ with tab1:
                 edited_df["Delivery Date"] = edited_df["Delivery Date"].astype(str)
                 edited_df["Combined Document File"] = doc_path
                 
-                # Strip out old file references if they exist from older templates
                 if "Invoice File" in edited_df.columns: edited_df = edited_df.drop(columns=["Invoice File"])
                 if "MIR File" in edited_df.columns: edited_df = edited_df.drop(columns=["MIR File"])
                 
@@ -199,8 +210,3 @@ with tab3:
         ).reset_index()
         
         summary_df.columns = ["Material Category", "Total Delivered Till Now", "Unit"]
-        summary_df["Total Required Quantity"] = summary_df["Material Category"].map(lambda x: float(saved_targets.get(str(x).strip(), 0.0)))
-        
-        summary_df["Fulfillment Progress Bar"] = summary_df["Total Delivered Till Now"] / summary_df["Total Required Quantity"].replace(0, 1)
-        summary_df.loc[summary_df["Total Required Quantity"] <= 0, "Fulfillment Progress Bar"] = 0.0
-        

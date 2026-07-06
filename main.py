@@ -205,7 +205,7 @@ with tab3:
                         model = genai.GenerativeModel('gemini-2.5-flash')
                         
                         excel_sample = excel_df.head(40).to_string()
-                                                prompt_excel = f"""
+                        prompt_excel = f"""
                         You are an expert Quantity Surveyor and Construction Data Analyst. Your task is to process row contents from an uploaded Interior Fit-out Project Bill of Quantities (BOQ) spreadsheet and map estimated volumes into a structured array.
 
                         Analyze this raw Excel row data context:

@@ -187,26 +187,26 @@ with tab2:
         st.info("No delivery records compiled inside storage records yet.")
 
 # ------------------------------------------
-# TAB 3: PROJECT ANALYTICS (CLEAN GROUPBY SPREADSHEET WITH STEPS)
+# TAB 3: PROJECT ANALYTICS
 # ------------------------------------------
 with tab3:
     st.header("📈 Dynamic Material Procurement Summary")
     
     if not ledger_df.empty:
-        # Step 1: Filter only approved passed rows securely
         passed_df = ledger_df[ledger_df["MIR Status"] == "Passed"].copy()
         
-        # Step 2: Use an internal Pandas grouping block instead of a bracketed manual loop
         summary_df = passed_df.groupby("Material Type").agg(
             Total_Delivered=("Quantity", "sum"),
             Unit=("Unit", "first")
         ).reset_index()
         
-        # Step 3: Clean up column layout names
         summary_df.columns = ["Material Category", "Total Delivered Till Now", "Unit"]
         
-        # Step 4: Map saved target configurations baseline elements
         summary_df["Total Required Quantity"] = summary_df["Material Category"].map(lambda x: float(saved_targets.get(str(x).strip(), 0.0)))
         
-        # Step 5: Compute progress fractional values
-        summary_df["Fulfillment Progress Bar"] = summary_df.apply(
+        # Super clean math calculation replacing the broken complex lambda function trap
+        summary_df["Fulfillment Progress Bar"] = summary_df["Total Delivered Till Now"] / summary_df["Total Required Quantity"].replace(0, 1)
+        summary_df.loc[summary_df["Total Required Quantity"] <= 0, "Fulfillment Progress Bar"] = 0.0
+        
+        st.info("💡 Click on the **Total Required Quantity** column to add or adjust your site targets using the stepper tools or text entry. Hit Save to compute live progress bar charts!")
+        

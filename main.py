@@ -187,31 +187,26 @@ with tab2:
         st.info("No delivery records compiled inside storage records yet.")
 
 # ------------------------------------------
-# TAB 3: PROJECT ANALYTICS (DYNAMIC PROGRESS BAR GRID)
+# TAB 3: PROJECT ANALYTICS (CLEAN GROUPBY SPREADSHEET WITH STEPS)
 # ------------------------------------------
 with tab3:
     st.header("📈 Dynamic Material Procurement Summary")
     
     if not ledger_df.empty:
-        delivered_materials = sorted(ledger_df["Material Type"].dropna().unique().tolist())
+        # Step 1: Filter only approved passed rows securely
+        passed_df = ledger_df[ledger_df["MIR Status"] == "Passed"].copy()
         
-        analytics_rows = []
-        for mat in delivered_materials:
-            match_rows = ledger_df[(ledger_df["Material Type"] == mat) & (ledger_df["MIR Status"] == "Passed")]
-            total_delivered = float(match_rows["Quantity"].sum())
-            
-            unit_label = "Units"
-            if not match_rows.empty and "Unit" in match_rows.columns:
-                unit_label = str(match_rows["Unit"].dropna().iloc[0])
-                
-            target_qty = float(saved_targets.get(mat, 0.0))
-            
-            fraction_val = 0.0
-            if target_qty > 0:
-                fraction_val = min(total_delivered / target_qty, 1.0)
-                
-            row_dict = {
-                "Material Category": mat,
-                "Total Delivered Till Now": total_delivered,
-                "Unit": unit_label,
-                "Total Required Quantity": target_qty,
+        # Step 2: Use an internal Pandas grouping block instead of a bracketed manual loop
+        summary_df = passed_df.groupby("Material Type").agg(
+            Total_Delivered=("Quantity", "sum"),
+            Unit=("Unit", "first")
+        ).reset_index()
+        
+        # Step 3: Clean up column layout names
+        summary_df.columns = ["Material Category", "Total Delivered Till Now", "Unit"]
+        
+        # Step 4: Map saved target configurations baseline elements
+        summary_df["Total Required Quantity"] = summary_df["Material Category"].map(lambda x: float(saved_targets.get(str(x).strip(), 0.0)))
+        
+        # Step 5: Compute progress fractional values
+        summary_df["Fulfillment Progress Bar"] = summary_df.apply(

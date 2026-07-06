@@ -49,7 +49,7 @@ def extract_document_data(api_key, invoice_file, mir_file, existing_categories):
         inv_img = Image.open(invoice_file)
         mir_img = Image.open(mir_file)
         
-        prompt = f"""
+        prompt = """
         Analyze these construction documents: Document 1 (Invoice), Document 2 (Inspection Report - MIR).
         Extract ALL items found on the invoice line entries.
         
@@ -59,7 +59,7 @@ def extract_document_data(api_key, invoice_file, mir_file, existing_categories):
 
         Format your response strictly as a JSON list of objects matching this template layout. Do not wrap in markdown or backticks:
         [
-            {{
+            {
                 "Delivery Date": "YYYY-MM-DD",
                 "Invoice No": "string",
                 "Supplier": "string",
@@ -68,7 +68,7 @@ def extract_document_data(api_key, invoice_file, mir_file, existing_categories):
                 "Unit": "string",
                 "MIR Ref No": "string",
                 "MIR Status": "Passed"
-            }}
+            }
         ]
         """
         response = model.generate_content([prompt, inv_img, mir_img])
@@ -150,7 +150,7 @@ with tab1:
                 st.rerun()
 
 # ------------------------------------------
-# TAB 2: MASTER LEDGER & RECONCILIATION
+# TAB 2: MASTER Ledger & RECONCILIATION
 # ------------------------------------------
 with tab2:
     st.header("Site Material Inventory Ledger Log")

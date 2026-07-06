@@ -186,20 +186,15 @@ with tab2:
         st.info("No delivery records compiled inside storage records yet.")
 
 # ------------------------------------------
-# TAB 3: PROJECT ANALYTICS (FLATTENED)
+# TAB 3: PROJECT ANALYTICS (FLATTENED & FIXED)
 # ------------------------------------------
 with tab3:
     st.header("Material Procurement Target Tracking Matrix")
     st.subheader("Configure Project Structural Requirements Estimations")
     
     inputs = {}
-    cols = st.columns(3)
     
-    # Flattened inputs to remove loop indentation traps
-    with cols[0]:
-        inputs["Cement"] = st.number_input("Total Cement Required:", min_value=0.0, value=float(targets.get("Cement", 0.0)), key="in_cement")
-    with cols[1]:
-        inputs["Gypsum Board"] = st.number_input("Total Gypsum Board Required:", min_value=0.0, value=float(targets.get("Gypsum Board", 0.0)), key="in_gypsum")
-    with cols[2]:
-        inputs["Partition Channel"] = st.number_input("Total Partition Channel Required:", min_value=0.0, value=float(targets.get("Partition Channel", 0.0)), key="in_partition")
-    with cols[0]:
+    # Using straight stacked layout to remove all layout column indentation risks completely
+    inputs["Cement"] = st.number_input("Total Cement Required:", min_value=0.0, value=float(targets.get("Cement", 0.0)), key="in_cement")
+    inputs["Gypsum Board"] = st.number_input("Total Gypsum Board Required:", min_value=0.0, value=float(targets.get("Gypsum Board", 0.0)), key="in_gypsum")
+    inputs["Partition Channel"] = st.number_input("Total Partition Channel Required:", min_value=0.0, value=float(targets.get("Partition Channel", 0.0)), key="in_partition")

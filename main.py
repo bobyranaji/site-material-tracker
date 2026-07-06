@@ -40,7 +40,7 @@ ledger_df = load_ledger()
 targets = load_targets()
 
 # ==========================================
-# 2. UPGRADED MULTI-ROW AI ENGINE (GEMINI)
+# 2. MULTI-ROW AI ENGINE (GEMINI)
 # ==========================================
 def extract_document_data(api_key, invoice_file, mir_file):
     try:
@@ -79,7 +79,7 @@ def extract_document_data(api_key, invoice_file, mir_file):
         clean_text = response.text.replace("```json", "").replace("```python", "").replace("```", "").strip()
         return json.loads(clean_text)
     except Exception as e:
-        st.error(f"AI multi-row parsing failed: {e}. You can append entries using the fallback template log below.")
+        st.error(f"AI multi-row parsing failed: {e}.")
         return None
 
 # ==========================================
@@ -89,7 +89,7 @@ st.title("🏗️ Smart Site Material Tracker & Reconciler")
 tab1, tab2, tab3 = st.tabs(["📋 Document Inwarding", "📊 Master Ledger & Reconciliation", "📈 Project Analytics"])
 
 # ------------------------------------------
-# TAB 1: DOCUMENT INWARDING (UPGRADED)
+# TAB 1: DOCUMENT INWARDING
 # ------------------------------------------
 with tab1:
     st.header("Scan & Upload Site Documents")
@@ -108,6 +108,12 @@ with tab1:
             with st.spinner("AI analyzing all invoice line items..."):
                 extracted_list = extract_document_data(api_key, inv_upload, mir_upload)
                 if extracted_list:
+                    # Clean up dates and force proper type conversion before data_editor
+                    for item in extracted_list:
+                        try:
+                            item["Delivery Date"] = datetime.datetime.strptime(item["Delivery Date"], "%Y-%m-%d").date()
+                        except Exception:
+                            item["Delivery Date"] = datetime.date.today()
                     st.session_state['parsed_items'] = extracted_list
                     st.success(f"Successfully extracted {len(extracted_list)} line items from your document!")
         else:
@@ -118,10 +124,9 @@ with tab1:
         st.subheader("📝 Step 2: Review and Edit Extracted Items")
         st.info("Double-click any cell below if you need to manually adjust names, categories, or quantities before final saving.")
         
-        # Turn data into an interactive editable table layout
         preview_df = pd.DataFrame(st.session_state['parsed_items'])
         
-        # Ensure column configurations look clean
+        # Grid setup with compatible simple configurations
         edited_df = st.data_editor(
             preview_df,
             column_config={
@@ -142,15 +147,16 @@ with tab1:
                 with open(inv_path, "wb") as f: f.write(inv_upload.getbuffer())
                 with open(mir_path, "wb") as f: f.write(mir_upload.getbuffer())
                 
-                # Append files pathways to every verified row item line
+                # Make sure date columns save as standard clean strings into the CSV database file
+                edited_df["Delivery Date"] = edited_df["Delivery Date"].astype(str)
                 edited_df["Invoice File"] = inv_path
                 edited_df["MIR File"] = mir_path
                 
-                # Merge into permanent records log csv
+                # Merge into records database log csv file
                 updated_df = pd.concat([ledger_df, edited_df], ignore_index=True)
                 updated_df.to_csv(DB_FILE, index=False)
                 
-                st.success("All items successfully logged! Checked items are now cleared.")
+                st.success("All items successfully logged!")
                 del st.session_state['parsed_items']
                 st.rerun()
 
@@ -187,12 +193,10 @@ with tab2:
         st.info("No delivery records compiled inside storage records yet.")
 
 # ------------------------------------------
-# TAB 3: PROJECT ANALYTICS (STAY FLATTENED)
+# TAB 3: PROJECT ANALYTICS
 # ------------------------------------------
 with tab3:
     st.header("Material Procurement Target Tracking Matrix")
     st.subheader("Configure Project Structural Requirements Estimations")
     
     inputs = {}
-    inputs["Cement"] = st.number_input("Total Cement Required:", min_value=0.0, value=float(targets.get("Cement", 0.0)), key="in_cement")
-    inputs["Gypsum Board"] = st.number_input("Total Gypsum Board Required:", min_value=0.0, value=float(targets.get("Gypsum Board", 0.0)), key="in_gypsum")

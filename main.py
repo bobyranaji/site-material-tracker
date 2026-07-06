@@ -15,10 +15,18 @@ UPLOAD_DIR = "stored_documents"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 DB_FILE = "material_ledger.csv"
 TARGET_FILE = "project_targets.csv"
+LIST_FILE = "material_list.csv"
 
-# Global Categories
-MATERIAL_LIST = ["Cement", "Gypsum Board", "Partition Channel", "Ceiling Framing Material", "Tiles", "Marble", "Glazing", "Other"]
-TARGET_MATERIALS = ["Cement", "Gypsum Board", "Partition Channel", "Ceiling Framing Material", "Tiles", "Marble", "Glazing"]
+# Core Seed List to initialize system
+DEFAULT_MATERIALS = ["Cement", "Gypsum Board", "Partition Channel", "Ceiling Framing Material", "Tiles", "Marble", "Glazing"]
+
+def load_material_list():
+    if os.path.exists(LIST_FILE):
+        try:
+            return pd.read_csv(LIST_FILE)["Material Type"].dropna().unique().tolist()
+        except Exception:
+            pass
+    return DEFAULT_MATERIALS.copy()
 
 def load_ledger():
     if os.path.exists(DB_FILE):
@@ -28,21 +36,26 @@ def load_ledger():
             pass
     return pd.DataFrame(columns=["Delivery Date", "Invoice No", "Supplier", "Material Type", "Quantity", "Unit", "MIR Ref No", "MIR Status", "Invoice File", "MIR File"])
 
-def load_targets():
+def load_targets(current_materials):
+    targets_dict = {mat: 0.0 for mat in current_materials}
     if os.path.exists(TARGET_FILE):
         try:
-            return pd.read_csv(TARGET_FILE).set_index("Material Type")["Target"].to_dict()
+            stored_df = pd.read_csv(TARGET_FILE)
+            for _, row in stored_df.iterrows():
+                targets_dict[row["Material Type"]] = float(row["Target"])
         except Exception:
             pass
-    return {mat: 0.0 for mat in TARGET_MATERIALS}
+    return targets_dict
 
+# Initialize all storage profiles dynamically
+current_materials = load_material_list()
 ledger_df = load_ledger()
-targets = load_targets()
+targets = load_targets(current_materials)
 
 # ==========================================
-# 2. MULTI-ROW AI ENGINE (GEMINI)
+# 2. DYNAMIC AI EXTRACTION ENGINE (GEMINI)
 # ==========================================
-def extract_document_data(api_key, invoice_file, mir_file):
+def extract_document_data(api_key, invoice_file, mir_file, existing_categories):
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -51,23 +64,20 @@ def extract_document_data(api_key, invoice_file, mir_file):
         
         prompt = f"""
         Analyze these construction documents: Document 1 (Invoice), Document 2 (Inspection Report - MIR).
-        The invoice may contain multiple different material entries or items. Extract ALL items found.
+        Extract ALL items found on the invoice line entries.
         
-        CRITICAL INSTRUCTION FOR MATERIAL TYPE MAPPING:
-        You must map whatever item name is written on the document into one of these strict categories: {', '.join(MATERIAL_LIST)}.
-        - If it mentions any variation of cement, map it to "Cement".
-        - If it mentions drywall, plasterboard, ceiling board, map it to "Gypsum Board".
-        - If it mentions studs, tracks, channels, map it to "Partition Channel" or "Ceiling Framing Material" depending on usage.
-        - If it mentions porcelain, ceramic, vitrified tiles, map it to "Tiles".
-        - Only use "Other" if it absolutely does not fit the main structural categories.
+        INSTRUCTION FOR MATERIAL TYPE IDENTIFICATION:
+        1. Look at the item description on the invoice.
+        2. First, try to match it cleanly to one of our existing site categories if relevant: {', '.join(existing_categories)}.
+        3. CRITICAL: If the material found is a completely brand new type or item not mentioned in that list, DO NOT use "Other". Instead, extract and clean its actual trade or commodity name from the invoice description text (e.g., "Granite", "Paint", "Plywood", "Screws") and use that as the "Material Type". Keep names concise (1 to 4 words max).
 
-        Format your final response strictly as a JSON list of objects matching this exact template layout. Do not wrap in backticks or markdown:
+        Format your final response strictly as a JSON list of objects matching this exact template layout. Do not wrap in markdown or code blocks:
         [
             {{
                 "Delivery Date": "YYYY-MM-DD",
                 "Invoice No": "string",
                 "Supplier": "string",
-                "Material Type": "One of the mapped options listed above",
+                "Material Type": "The matched or brand new extracted category name",
                 "Quantity": 0.0,
                 "Unit": "string",
                 "MIR Ref No": "string",
@@ -105,32 +115,31 @@ with tab1:
         if not api_key:
             st.warning("Please provide an API Key first!")
         elif inv_upload and mir_upload:
-            with st.spinner("AI analyzing all invoice line items..."):
-                extracted_list = extract_document_data(api_key, inv_upload, mir_upload)
+            with st.spinner("AI parsing all line items dynamically..."):
+                extracted_list = extract_document_data(api_key, inv_upload, mir_upload, current_materials)
                 if extracted_list:
-                    # Clean up dates and force proper type conversion before data_editor
                     for item in extracted_list:
                         try:
                             item["Delivery Date"] = datetime.datetime.strptime(item["Delivery Date"], "%Y-%m-%d").date()
                         except Exception:
                             item["Delivery Date"] = datetime.date.today()
                     st.session_state['parsed_items'] = extracted_list
-                    st.success(f"Successfully extracted {len(extracted_list)} line items from your document!")
+                    st.success(f"Successfully extracted {len(extracted_list)} line items!")
         else:
-            st.error("Please upload both the Invoice and the MIR file.")
+            st.error("Please upload both documents first.")
 
     # Live Preview and Verification Spreadsheet Table
     if 'parsed_items' in st.session_state:
         st.subheader("📝 Step 2: Review and Edit Extracted Items")
-        st.info("Double-click any cell below if you need to manually adjust names, categories, or quantities before final saving.")
+        st.info("You can add temporary categories or double-click to clean text strings directly in the layout grid below.")
         
         preview_df = pd.DataFrame(st.session_state['parsed_items'])
         
-        # Grid setup with compatible simple configurations
+        # Grid setup with dynamic type tracking options enabled
         edited_df = st.data_editor(
             preview_df,
             column_config={
-                "Material Type": st.column_config.SelectboxColumn("Material Category", options=MATERIAL_LIST, required=True),
+                "Material Type": st.column_config.TextColumn("Material Category", help="If AI created a new name, keep it or adjust spelling here", required=True),
                 "Delivery Date": st.column_config.DateColumn("Date", required=True),
                 "Quantity": st.column_config.NumberColumn("Qty", min_value=0.0, format="%.2f")
             },
@@ -147,16 +156,23 @@ with tab1:
                 with open(inv_path, "wb") as f: f.write(inv_upload.getbuffer())
                 with open(mir_path, "wb") as f: f.write(mir_upload.getbuffer())
                 
-                # Make sure date columns save as standard clean strings into the CSV database file
+                # Format tracking fields out into string configurations
                 edited_df["Delivery Date"] = edited_df["Delivery Date"].astype(str)
                 edited_df["Invoice File"] = inv_path
                 edited_df["MIR File"] = mir_path
                 
-                # Merge into records database log csv file
+                # Dynamic Sync: Check if any new item types were registered
+                incoming_materials = edited_df["Material Type"].dropna().unique().tolist()
+                updated_materials = list(set(current_materials + incoming_materials))
+                
+                # Commit dynamic category structural lists back to file system storage
+                pd.DataFrame({"Material Type": updated_materials}).to_csv(LIST_FILE, index=False)
+                
+                # Merge row adjustments into general transactional ledger files
                 updated_df = pd.concat([ledger_df, edited_df], ignore_index=True)
                 updated_df.to_csv(DB_FILE, index=False)
                 
-                st.success("All items successfully logged!")
+                st.success("All items successfully processed and categories dynamically synchronized!")
                 del st.session_state['parsed_items']
                 st.rerun()
 
@@ -168,7 +184,7 @@ with tab2:
     if not ledger_df.empty:
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            f_mat = st.multiselect("Filter by Material Category", MATERIAL_LIST, default=MATERIAL_LIST)
+            f_mat = st.multiselect("Filter by Material Category", current_materials, default=current_materials)
         with col_f2:
             unique_suppliers = ledger_df["Supplier"].dropna().unique().tolist()
             f_vendor = st.multiselect("Filter by Supplier Vendor", unique_suppliers, default=unique_suppliers)
@@ -186,17 +202,3 @@ with tab2:
                         c3.download_button(label="📥 Download Invoice", data=file_inv.read(), file_name=os.path.basename(str(row["Invoice File"])), key=f"inv_{index}")
                 if os.path.exists(str(row["MIR File"])):
                     with open(str(row["MIR File"]), "rb") as file_mir:
-                        c4.download_button(label="📥 Download MIR", data=file_mir.read(), file_name=os.path.basename(str(row["MIR File"])), key=f"mir_{index}")
-                    
-        st.download_button(label="📊 Export Full Ledger Log to CSV", data=filtered_df.to_csv(index=False), file_name="site_reconciliation_report.csv", mime="text/csv")
-    else:
-        st.info("No delivery records compiled inside storage records yet.")
-
-# ------------------------------------------
-# TAB 3: PROJECT ANALYTICS
-# ------------------------------------------
-with tab3:
-    st.header("Material Procurement Target Tracking Matrix")
-    st.subheader("Configure Project Structural Requirements Estimations")
-    
-    inputs = {}

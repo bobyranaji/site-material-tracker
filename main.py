@@ -205,45 +205,45 @@ with tab3:
                         model = genai.GenerativeModel('gemini-2.5-flash')
                         
                         excel_sample = excel_df.head(40).to_string()
-                        prompt_excel = f"""
+                                                prompt_excel = f"""
                         You are an expert Quantity Surveyor and Construction Data Analyst. Your task is to process row contents from an uploaded Interior Fit-out Project Bill of Quantities (BOQ) spreadsheet and map estimated volumes into a structured array.
 
-Analyze this raw Excel row data context:
-[INSERT_YOUR_EXCEL_DATA_OR_TEXT_HERE]
+                        Analyze this raw Excel row data context:
+                        {excel_sample}
+                        
+                        CRITICAL SCOPE MAPPING RULES:
+                        You must categorize every discovered row item strictly into one of these standard Interior Fit-out classifications:
+                        - "Gypsum Board" (e.g., plasterboard walls, drywall ceilings, fire-rated partitions)
+                        - "Partition Channel" (e.g., metal studs, GI tracks, wall bracing profiles)
+                        - "Ceiling Framing Material" (e.g., perimeter channels, main runners, hangers, suspension grids)
+                        - "Tiles" (e.g., ceramic floors, porcelain tiling, vitrified wall dados, skirting tiles)
+                        - "Marble" (e.g., granite counters, natural stone vanity tops, marble flooring slabs)
+                        - "Glazing / Glass Panels" (e.g., toughened glass partitions, mirrors, storefront glass, patch fittings)
+                        - "Wall Paint" (e.g., acrylic emulsion, primers, putty, textured wall coatings, finishes)
+                        - "Acoustic Ceiling Tiles" (e.g., mineral fiber grids, glass-wool boards, soundproofing tiles)
+                        - "Plywood / MDF Boards" (e.g., commercial ply framing, marine ply cabinetry, veneer backing wood)
+                        - "Laminates / Veneer" (e.g., decorative mica sheets, high-pressure laminates, wood veneer skins)
+                        - "Hardware Locks & Hinges" (e.g., hydraulic door closers, cabinet drawer slides, handles, locks)
+                        - "Electrical Conduit Pipes" (e.g., PVC casing pipes, flexible pipes, junction boxes hidden in wall voids)
+                        - "LED Light Fixtures" (e.g., recessed downlights, COB strip lights, panel fittings, task drivers)
 
-CRITICAL SCOPE MAPPING RULES:
-You must categorize every discovered row item strictly into one of these standard Interior Fit-out classifications:
-- "Gypsum Board" (e.g., plasterboard walls, drywall ceilings, fire-rated partitions)
-- "Partition Channel" (e.g., metal studs, GI tracks, wall bracing profiles)
-- "Ceiling Framing Material" (e.g., perimeter channels, main runners, hangers, suspension grids)
-- "Tiles" (e.g., ceramic floors, porcelain tiling, vitrified wall dados, skirting tiles)
-- "Marble" (e.g., granite counters, natural stone vanity tops, marble flooring slabs)
-- "Glazing / Glass Panels" (e.g., toughened glass partitions, mirrors, storefront glass, patch fittings)
-- "Wall Paint" (e.g., acrylic emulsion, primers, putty, textured wall coatings, finishes)
-- "Acoustic Ceiling Tiles" (e.g., mineral fiber grids, glass-wool boards, soundproofing tiles)
-- "Plywood / MDF Boards" (e.g., commercial ply framing, marine ply cabinetry, veneer backing wood)
-- "Laminates / Veneer" (e.g., decorative mica sheets, high-pressure laminates, wood veneer skins)
-- "Hardware Locks & Hinges" (e.g., hydraulic door closers, cabinet drawer slides, handles, locks)
-- "Electrical Conduit Pipes" (e.g., PVC casing pipes, flexible pipes, junction boxes hidden in wall voids)
-- "LED Light Fixtures" (e.g., recessed downlights, COB strip lights, panel fittings, task drivers)
+                        DATA AGGREGATION DIRECTIVES:
+                        1. Ignore items that do not fall under interior fit-out works (e.g., structural concrete foundation, masonry bricks, landscaping).
+                        2. Clean up complex, wordy trade descriptions into short descriptions matching the exact strings provided above.
+                        3. If the same material category appears across multiple lines or rows (e.g., Gypsum Board used in separate rooms or floors), sum up their quantities into a single aggregated total value.
+                        4. Extract the clean float/integer number representing the cumulative total required quantity.
 
-DATA AGGREGATION DIRECTIVES:
-1. Ignore items that do not fall under interior fit-out works (e.g., structural concrete foundation, masonry bricks, landscaping).
-2. Clean up complex, wordy trade descriptions into short descriptions matching the exact strings provided above.
-3. If the same material category appears across multiple lines or rows (e.g., Gypsum Board used in separate rooms or floors), sum up their quantities into a single aggregated total value.
-4. Extract the clean float/integer number representing the cumulative total required quantity.
+                        OUTPUT RESTRAINT:
+                        Provide your final output STRICTLY as a raw, clean JSON list of objects matching this exact layout template. Do not include markdown wraps, "```json" block indicators, backticks, or any conversational text or preambles. Output only the clean JSON string structure:
 
-OUTPUT RESTRAINT:
-Provide your final output STRICTLY as a raw, clean JSON list of objects matching this exact layout template. Do not include markdown wraps, "```json" block indicators, backticks, or any conversational text or preambles. Output only the clean JSON string structure:
-
-[
-  {
-    "Material Category": "Exact classification string from list above",
-    "Total Required Quantity": 0.0
-  }
-]
-
+                        [
+                          {{
+                            "Material Category": "Exact classification string from list above",
+                            "Total Required Quantity": 0.0
+                          }}
+                        ]
                         """
+
                         response = model.generate_content(prompt_excel)
                         clean_text = response.text.replace("```json", "").replace("```python", "").replace("```", "").strip()
                         parsed_boq = json.loads(clean_text)

@@ -31,8 +31,7 @@ FITOUT_MATERIALS = [
     "Laminates / Veneer",
     "Hardware Locks & Hinges",
     "Electrical Conduit Pipes",
-    "LED Light Fixtures",
-    "Other Fitout Items"
+    "LED Light Fixtures"
 ]
 
 def load_ledger():
@@ -49,10 +48,10 @@ def load_targets():
         try:
             stored_df = pd.read_csv(TARGET_FILE)
             for _, row in stored_df.iterrows():
-                # Flexible string reading to bind keys safely
                 mat_name = str(row.iloc[0]).strip()
                 target_val = float(row.iloc[1])
-                targets_dict[mat_name] = target_val
+                if mat_name in targets_dict:
+                    targets_dict[mat_name] = target_val
         except Exception:
             pass
     return targets_dict
@@ -225,3 +224,4 @@ with tab2:
                     c3.download_button(label="📥 Download Combined Doc", data=file_data, file_name=os.path.basename(doc_file_str), key=f"doc_{index}")
                     
         st.download_button(label="📊 Export Full Ledger Log to CSV", data=filtered_df.to_csv(index=False), file_name="site_reconciliation_report.csv", mime="text/csv")
+    else:
